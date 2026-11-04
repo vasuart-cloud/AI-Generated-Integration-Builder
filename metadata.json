@@ -1,0 +1,6 @@
+{
+  "name": "CloudEagle Developer Integration Studio",
+  "description": "From API documentation to trustworthy integration code—with developers in control. Validate SaaS API docs, supervise resumable multi-agent code generation with mandatory human approvals, inspect and edit TypeScript connectors, and debug redacted traces.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
