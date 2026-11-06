@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "start": "node server.ts",
-    "build": "vite build && cp -R dist/. public/ && esbuild server.ts --bundle --platform=node --packages=external --format=esm --target=node22 --outfile=server-bundle.mjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --packages=external --format=esm --target=node22 --outfile=server-bundle.mjs",
     "preview": "vite preview",
     "test": "tsx --test src/server/__tests__/studio.test.ts",
     "clean": "rm -rf dist server.js",
