@@ -246,7 +246,7 @@ export class StudioStore {
       name: string;
       description: string;
       categoryId: string;
-      uiLayers: UILayer[];
+      uiLayers?: UILayer[];
     }
   ): Integration {
     // CRITICAL: Owner is ALWAYS derived from server session actorId, ignoring any client ownerId payload.
@@ -268,9 +268,6 @@ export class StudioStore {
         'DESCRIPTION_REQUIRED',
         'Provide a clear description (at least 8 characters) of what app/capability this integration connects.'
       );
-    }
-    if (uiLayers.length === 0) {
-      throw new StudioHttpError(400, 'UI_LAYER_REQUIRED', 'Select at least one target UI layer.');
     }
     const category = this.state.categories.find((c) => c.id === categoryId);
     if (!category) {

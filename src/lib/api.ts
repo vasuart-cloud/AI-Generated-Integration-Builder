@@ -140,7 +140,7 @@ export const studioApi = {
       name: string;
       description: string;
       categoryId: string;
-      uiLayers: UILayer[];
+      uiLayers?: UILayer[];
     }
   ): Promise<{ integration: IntegrationWithAccess }> {
     return requestJson('/api/integrations', actorId, {

@@ -40,7 +40,7 @@ interface CatalogViewProps {
   onOpenCodeWorkspace: (integrationId: string, runId: string) => void;
   onUpdateIntegration: (
     integrationId: string,
-    patch: { name: string; description: string; categoryId: string; uiLayers: UILayer[] }
+    patch: { name: string; description: string; categoryId: string; uiLayers?: UILayer[] }
   ) => Promise<void>;
   onDeleteOrArchiveIntegration: (
     integrationId: string,
@@ -126,7 +126,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
             categories.find((c) => c.id === item.categoryId)?.name.toLowerCase() ?? '';
           const ownerName =
             developers.find((d) => d.id === item.ownerId)?.name.toLowerCase() ?? 'cloudeagle';
-          const hay = `${item.name} ${item.description} ${catName} ${ownerName} ${item.uiLayers.join(' ')}`.toLowerCase();
+          const hay = `${item.name} ${item.description} ${catName} ${ownerName} ${(item.uiLayers ?? []).join(' ')}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
         return true;
@@ -160,7 +160,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
     setEditName(item.name);
     setEditDesc(item.description);
     setEditCatId(item.categoryId);
-    setEditLayers([...item.uiLayers]);
+    setEditLayers(item.uiLayers ? [...item.uiLayers] : []);
     setEditError(null);
   };
 
@@ -247,42 +247,56 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
         </button>
       </div>
 
-      {/* Interactive Category Filter Bar */}
+      {/* Interactive Category Filter & Search Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-4">
-        <div
-          className="flex flex-wrap items-center gap-1.5"
-          role="group"
-          aria-label="Filter integrations by category"
-        >
-          <button
-            type="button"
-            onClick={() => setSelectedCategoryId('all')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap tabular-nums ${
-              selectedCategoryId === 'all'
-                ? 'bg-slate-900 text-white'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            All Categories ({categoryCounts.all ?? 0})
-          </button>
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              type="button"
-              onClick={() => setSelectedCategoryId(cat.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap tabular-nums ${
-                selectedCategoryId === cat.id
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              {cat.name} ({categoryCounts[cat.id] ?? 0})
-            </button>
-          ))}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 flex-1">
+            <div className="w-full sm:w-72">
+              <label htmlFor="catalog-category-dropdown" className="block text-xs font-semibold text-slate-700 mb-1">
+                Category
+              </label>
+              <select
+                id="catalog-category-dropdown"
+                aria-label="Filter integrations by category"
+                value={selectedCategoryId}
+                onChange={(e) => setSelectedCategoryId(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-medium border border-slate-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-600 cursor-pointer"
+              >
+                <option value="all">
+                  All Categories ({categoryCounts.all ?? 0})
+                </option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name} ({categoryCounts[cat.id] ?? 0})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="pt-5 hidden sm:block text-xs font-semibold text-slate-500 whitespace-nowrap">
+              Showing <span className="font-bold text-slate-900">{filteredItems.length}</span> {filteredItems.length === 1 ? 'integration' : 'integrations'}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:self-end">
+            {(searchQuery || selectedCategoryId !== 'all' || ownershipFilter !== (mode === 'mine' ? 'mine' : 'all')) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedCategoryId('all');
+                  setOwnershipFilter(mode === 'mine' ? 'mine' : 'all');
+                }}
+                className="px-3 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search, Ownership, Sort & Tile/List View Switcher */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-2 border-t border-slate-100">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-3 border-t border-slate-100">
           <div className="relative flex-1 max-w-md">
             <Search
               size={15}
@@ -476,9 +490,6 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                       <span aria-hidden="true">·</span>
                       <span>{getOwnerLabel(item)}</span>
                     </div>
-                    <div className="truncate">
-                      UI Layers: {item.uiLayers.map(formatUiLayer).join(' / ')}
-                    </div>
                     <div className="tabular-nums">
                       Modified {formatShortDate(item.updatedAt)}
                     </div>
@@ -590,7 +601,6 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
               <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-semibold text-slate-600">
                 <th className="py-3 px-4">Integration</th>
                 <th className="py-3 px-4">Category</th>
-                <th className="py-3 px-4">UI Layers</th>
                 <th className="py-3 px-4">Owner / Source</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4 text-right">Modified</th>
@@ -622,9 +632,6 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                     </td>
                     <td className="py-3 px-4 text-slate-700 whitespace-nowrap">
                       {getCategoryName(item.categoryId)}
-                    </td>
-                    <td className="py-3 px-4 text-slate-600 max-w-[200px] truncate">
-                      {item.uiLayers.map(formatUiLayer).join(' · ')}
                     </td>
                     <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
                       {getOwnerLabel(item)}
@@ -795,9 +802,9 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                 <dd className="font-medium text-slate-900 mt-0.5">{inspectingItem.sourceType}</dd>
               </div>
               <div>
-                <dt className="text-slate-500">Target UI Layers</dt>
+                <dt className="text-slate-500">Category</dt>
                 <dd className="font-medium text-slate-900 mt-0.5">
-                  {inspectingItem.uiLayers.map(formatUiLayer).join(', ')}
+                  {getCategoryName(inspectingItem.categoryId)}
                 </dd>
               </div>
               <div>
@@ -924,34 +931,6 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                   </option>
                 ))}
               </select>
-            </div>
-
-            <div>
-              <span className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Target UI Layers
-              </span>
-              <div className="grid grid-cols-2 gap-2">
-                {UI_LAYER_OPTIONS.map((opt) => {
-                  const checked = editLayers.includes(opt.value);
-                  return (
-                    <label
-                      key={opt.value}
-                      className="flex items-center gap-2 p-2 rounded-md border border-slate-200 text-xs cursor-pointer hover:bg-slate-50"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setEditLayers((prev) =>
-                            checked ? prev.filter((x) => x !== opt.value) : [...prev, opt.value]
-                          );
-                        }}
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  );
-                })}
-              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200">

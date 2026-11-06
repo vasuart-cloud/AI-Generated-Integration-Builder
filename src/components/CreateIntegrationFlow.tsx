@@ -83,7 +83,6 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
   // Stage 1: Conversational & Live Form State
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [uiLayers, setUiLayers] = useState<UILayer[]>([]);
   const [categoryId, setCategoryId] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
   const [chatInput, setChatInput] = useState('');
@@ -91,7 +90,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
     {
       id: 'welcome-1',
       sender: 'assistant',
-      text: 'Welcome to Integration Definition. Step 1 of 5: What is the name of the SaaS integration you want to build (for example, Calendly)? You can also provide multiple details in one message.',
+      text: `Hi ${currentDeveloper.name.split(' ')[0]}! I'll help you create a new SaaS integration. Let's start with the integration name.`,
     },
   ]);
   const [stage1Error, setStage1Error] = useState<string | null>(null);
@@ -135,7 +134,6 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
       if (wasEditingExisting) {
         setName('');
         setDescription('');
-        setUiLayers([]);
         setCategoryId('');
         setCategorySearch('');
         setChatInput('');
@@ -155,7 +153,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
           {
             id: `welcome-${Date.now()}`,
             sender: 'assistant',
-            text: 'Welcome to Integration Definition. Step 1 of 5: What is the name of the SaaS integration you want to build (for example, Calendly)? You can also provide multiple details in one message.',
+            text: `Hi ${currentDeveloper.name.split(' ')[0]}! I'll help you create a new SaaS integration. Let's start with the integration name.`,
           },
         ]);
       }
@@ -171,7 +169,6 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
         setDraftIntegration(detail.integration);
         setName(detail.integration.name);
         setDescription(detail.integration.description);
-        setUiLayers(detail.integration.uiLayers);
         setCategoryId(detail.integration.categoryId);
 
         if (detail.latestValidValidation && detail.discovery) {
@@ -210,14 +207,13 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
     };
   }, [activeIntegrationId, actorId]);
 
-  // Compute conversational step progress (1 to 5)
+  // Compute conversational step progress (1 to 3, then ready)
   const definitionStep = useMemo(() => {
     if (!name.trim()) return 1;
     if (description.trim().length < 8) return 2;
-    if (uiLayers.length === 0) return 3;
-    if (!categoryId) return 4;
-    return 5;
-  }, [name, description, uiLayers, categoryId]);
+    if (!categoryId) return 3;
+    return 4; // Ready for pre-creation summary & submission
+  }, [name, description, categoryId]);
 
   const duplicateNameConflict = useMemo(() => {
     const trimmed = name.trim().toLowerCase();
@@ -254,28 +250,12 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
 
     let nextName = name;
     let nextDesc = description;
-    let nextLayers = [...uiLayers];
     let nextCatId = categoryId;
 
     const lower = raw.toLowerCase();
 
-    // Detect UI layer mentions when at Step >= 3 or in multi-clause prompts
-    if (stepBeforeTurn >= 3 || isMultiClause) {
-      for (const opt of UI_LAYER_OPTIONS) {
-        if (
-          lower.includes(opt.label.toLowerCase()) ||
-          lower.includes(opt.value.replace('_', ' ')) ||
-          (opt.value === 'api_only' && (lower.includes('api-only') || lower.includes('api only')))
-        ) {
-          if (!nextLayers.includes(opt.value)) {
-            nextLayers.push(opt.value);
-          }
-        }
-      }
-    }
-
-    // Detect existing category mentions when at Step >= 4 or explicitly referenced in multi-clause prompt
-    if (stepBeforeTurn >= 4 || (isMultiClause && /\b(category|in\s+[a-z])/i.test(raw))) {
+    // Detect existing category mentions when at Step >= 3 or explicitly referenced in multi-clause prompt
+    if (stepBeforeTurn >= 3 || (isMultiClause && /\b(category|in\s+[a-z])/i.test(raw))) {
       for (const cat of categories) {
         if (lower.includes(cat.name.toLowerCase())) {
           nextCatId = cat.id;
@@ -303,13 +283,12 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
 
     setName(nextName);
     setDescription(nextDesc);
-    setUiLayers(nextLayers);
     setCategoryId(nextCatId);
     setChatInput('');
     setStage1Error(null);
 
     let proposedNewCategory = '';
-    if (stepBeforeTurn === 4 && !nextCatId && raw.length >= 2 && raw.length <= 48) {
+    if (stepBeforeTurn === 3 && !nextCatId && raw.length >= 2 && raw.length <= 48) {
       proposedNewCategory = raw
         .replace(/^(create|add|new)\s+(new\s+)?category\s*[:\-]?\s*/i, '')
         .trim();
@@ -323,28 +302,25 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
       }
     }
 
-    // Determine next sequential assistant prompt
+    // Determine next sequential assistant prompt matching Feature 4 requirements
     let reply = '';
     if (!nextName.trim()) {
-      reply = 'Step 1 of 5: Please provide a non-empty integration name.';
+      reply = 'What would you like to name this integration?';
     } else if (
       existingIntegrations.some(
         (i) => i.status !== 'archived' && i.name.toLowerCase() === nextName.trim().toLowerCase()
       )
     ) {
-      reply = `An integration named "${nextName.trim()}" already exists in this workspace. Please provide a unique integration name.`;
+      reply = `An active integration named "${nextName.trim()}" already exists in this workspace. Please provide a unique integration name.`;
     } else if (nextDesc.trim().length < 8) {
-      reply = `Captured name "${nextName.trim()}". Step 2 of 5: Provide a short description (at least 8 characters) of what SaaS capability or data this integration connects.`;
-    } else if (nextLayers.length === 0) {
-      reply =
-        'Step 3 of 5: Which UI layer(s) will consume this integration? Choose from Developer Console, API-only, Workflow Automation, Embedded End-User UI, or Chatbot.';
+      reply = 'Great! Please describe what this integration will do.';
     } else if (!nextCatId) {
       reply = proposedNewCategory
         ? `Category "${proposedNewCategory}" is not in the catalog yet — opened the Create New Category dialog so you can save and select it.`
-        : `Step 4 of 5: Which category should "${nextName.trim()}" belong to (e.g., Scheduling, CRM, Messaging, Collaboration), or click "+ Create New Category" to add a new one?`;
+        : 'Which category does this integration belong to? Select CRM, Messaging, Collaboration, Scheduling, or click "+ Create New Category".';
     } else {
       const catLabel = categories.find((c) => c.id === nextCatId)?.name ?? nextCatId;
-      reply = `Step 5 of 5: All required metadata captured for "${nextName.trim()}" in ${catLabel}. Review the Integration Definition summary on the right and click "Create Draft Integration".`;
+      reply = `All details captured for "${nextName.trim()}" in ${catLabel}. Review the summary on the right and click "Create Integration".`;
     }
 
     nextTurns.push({
@@ -363,17 +339,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
         {
           id: `back-${Date.now()}`,
           sender: 'assistant',
-          text: 'Cleared Category selection (Step 4 of 5). Select or type a category.',
-        },
-      ]);
-    } else if (uiLayers.length > 0) {
-      setUiLayers([]);
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          id: `back-${Date.now()}`,
-          sender: 'assistant',
-          text: 'Cleared UI Layer selection (Step 3 of 5). Select one or more target UI layers.',
+          text: 'Which category does this integration belong to? Select from the dropdown or click "+ Create New Category".',
         },
       ]);
     } else if (description) {
@@ -383,7 +349,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
         {
           id: `back-${Date.now()}`,
           sender: 'assistant',
-          text: 'Cleared Description (Step 2 of 5). Enter what capability this integration connects.',
+          text: 'Great! Please describe what this integration will do.',
         },
       ]);
     } else if (name) {
@@ -393,7 +359,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
         {
           id: `back-${Date.now()}`,
           sender: 'assistant',
-          text: 'Cleared Integration Name (Step 1 of 5). Enter the integration name.',
+          text: 'What would you like to name this integration?',
         },
       ]);
     }
@@ -403,9 +369,8 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
     const schedulingCat = categories.find((c) => c.name.toLowerCase() === 'scheduling');
     setName('Calendly');
     setDescription(
-      'Collect organization memberships, user profiles, and 30-day scheduled event activity proxies via Calendly REST API v2.'
+      'Retrieve organization users and scheduling activity data from Calendly for SaaS visibility and governance.'
     );
-    setUiLayers(['developer_console', 'api_only']);
     if (schedulingCat) {
       setCategoryId(schedulingCat.id);
     }
@@ -415,12 +380,12 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
       {
         id: `usr-cal-${Date.now()}`,
         sender: 'developer',
-        text: 'Calendly — Collect organization memberships, user profiles, and 30-day scheduled event activity proxies in Scheduling for Developer Console and API-only.',
+        text: 'Calendly — Retrieve organization users and scheduling activity data from Calendly for SaaS visibility and governance.',
       },
       {
         id: `ast-cal-${Date.now() + 1}`,
         sender: 'assistant',
-        text: 'Step 5 of 5: Captured Calendly in Scheduling with Developer Console + API-only layers. Review the summary on the right and click "Create Draft Integration".',
+        text: 'All details captured for Calendly in Scheduling. Review the summary on the right and click "Create Integration".',
       },
     ]);
   };
@@ -445,8 +410,8 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
           id: `ast-cat-${Date.now()}`,
           sender: 'assistant',
           text:
-            name.trim() && description.trim().length >= 8 && uiLayers.length > 0
-              ? `Step 5 of 5: Created and selected new category "${category.name}" for "${name.trim()}". Review the Integration Definition summary on the right and click "Create Draft Integration".`
+            name.trim() && description.trim().length >= 8
+              ? `Created and selected new category "${category.name}" for "${name.trim()}". Review the summary on the right and click "Create Integration".`
               : `Created and selected new category "${category.name}".`,
         },
       ]);
@@ -460,24 +425,27 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
 
   const handleCreateDraft = async () => {
     setStage1Error(null);
-    if (!name.trim()) {
-      setStage1Error('Integration name is required.');
+    const trimmedName = name.trim();
+    const trimmedDesc = description.trim();
+
+    if (!trimmedName) {
+      setStage1Error('Integration Name is required.');
       return;
     }
     if (duplicateNameConflict) {
       setStage1Error(`An active integration named "${duplicateNameConflict.name}" already exists.`);
       return;
     }
-    if (description.trim().length < 8) {
-      setStage1Error('Provide a short description (at least 8 characters).');
+    if (!trimmedDesc) {
+      setStage1Error('Integration Description is required.');
       return;
     }
-    if (uiLayers.length === 0) {
-      setStage1Error('Select at least one UI layer.');
+    if (trimmedDesc.length < 8) {
+      setStage1Error('Provide a description (at least 8 characters) of what this integration will do.');
       return;
     }
     if (!categoryId) {
-      setStage1Error('Select a category for this integration.');
+      setStage1Error('Category is required. Select a category for this integration.');
       return;
     }
 
@@ -485,26 +453,26 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
     try {
       if (draftIntegration) {
         const { integration } = await studioApi.updateIntegration(actorId, draftIntegration.id, {
-          name: name.trim(),
-          description: description.trim(),
+          name: trimmedName,
+          description: trimmedDesc,
           categoryId,
-          uiLayers,
         });
         setDraftIntegration(integration);
         await onDraftCreated(integration);
+        onNotify('success', `${integration.name} integration updated successfully.`);
       } else {
         const { integration } = await studioApi.createIntegrationDraft(actorId, {
-          name: name.trim(),
-          description: description.trim(),
+          name: trimmedName,
+          description: trimmedDesc,
           categoryId,
-          uiLayers,
         });
         setDraftIntegration(integration);
         await onDraftCreated(integration);
+        onNotify('success', `${integration.name} integration created successfully.`);
       }
       setWizardStage(2);
     } catch (err) {
-      setStage1Error(err instanceof Error ? err.message : 'Failed to create draft integration.');
+      setStage1Error(err instanceof Error ? err.message : 'Failed to save integration.');
     } finally {
       setCreatingDraft(false);
     }
@@ -721,7 +689,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
                       Integration Setup Assistant
                     </h2>
                     <p className="text-xs text-slate-500 tabular-nums">
-                      Sequential capture · Step {definitionStep} of 5
+                      Step {Math.min(definitionStep, 3)} of 3 · {definitionStep === 1 ? 'Name' : definitionStep === 2 ? 'Description' : 'Category'}
                     </p>
                   </div>
                 </div>
@@ -771,8 +739,8 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
                     definitionStep === 1
                       ? 'Type integration name (e.g. Calendly)...'
                       : definitionStep === 2
-                      ? 'Describe what API capability it connects...'
-                      : 'Reply with UI layers or category...'
+                      ? 'Describe what this integration will do...'
+                      : 'Type category or click Create New Category...'
                   }
                   className="flex-1 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-600"
                 />
@@ -799,24 +767,26 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
                   onClick={onCancelCreation}
                   className="text-rose-700 hover:text-rose-900 font-medium"
                 >
-                  Cancel Creation
+                  Cancel
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Right Pane: Live Integration Definition Form / Summary */}
+          {/* Right Pane: Live Integration Definition Form & Pre-Creation Summary */}
           <div className="lg:col-span-6 bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between space-y-5">
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-900">Integration Definition</h2>
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    {definitionStep >= 4 ? 'Pre-Creation Summary' : 'Integration Definition'}
+                  </h2>
                   <p className="text-xs text-slate-500">
-                    Synchronized live form · Owner derived from session ({currentDeveloper.name})
+                    Owner: <span className="font-semibold text-slate-800">{currentDeveloper.name}</span> · Status: <span className="font-semibold text-sky-700">Draft</span>
                   </p>
                 </div>
                 <span className="text-xs font-mono text-slate-500 tabular-nums">
-                  {definitionStep} / 5 complete
+                  {Math.min(definitionStep, 3)} / 3 answered
                 </span>
               </div>
 
@@ -830,7 +800,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
               {/* 1. Integration Name */}
               <div>
                 <label htmlFor="def-name-input" className="block text-xs font-semibold text-slate-700 mb-1">
-                  1. Integration Name <span className="text-rose-600">*</span>
+                  Integration Name <span className="text-rose-600">*</span>
                 </label>
                 <input
                   id="def-name-input"
@@ -854,64 +824,23 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
               {/* 2. Short Description */}
               <div>
                 <label htmlFor="def-desc-input" className="block text-xs font-semibold text-slate-700 mb-1">
-                  2. Short Description <span className="text-rose-600">*</span>
+                  Description <span className="text-rose-600">*</span>
                 </label>
                 <textarea
                   id="def-desc-input"
-                  rows={2}
+                  rows={3}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Describe what app, user inventory, or activity data it connects..."
+                  placeholder="Describe what this integration will do..."
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-600"
                 />
               </div>
 
-              {/* 3. UI Layer Multiselect */}
-              <div>
-                <span className="block text-xs font-semibold text-slate-700 mb-0.5">
-                  3. Target UI Layer(s) <span className="text-rose-600">*</span>
-                </span>
-                <p className="text-xs text-slate-500 mb-2">
-                  UI layer defines where consumers will access the integration; this is integration
-                  metadata, not an AI-generated UI requirement.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {UI_LAYER_OPTIONS.map((opt) => {
-                    const checked = uiLayers.includes(opt.value);
-                    return (
-                      <label
-                        key={opt.value}
-                        className={`flex items-start gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
-                          checked
-                            ? 'border-sky-600 bg-sky-50/60 text-slate-900'
-                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setUiLayers((prev) =>
-                              checked ? prev.filter((x) => x !== opt.value) : [...prev, opt.value]
-                            )
-                          }
-                          className="mt-0.5"
-                        />
-                        <div>
-                          <div className="font-semibold">{opt.label}</div>
-                          <div className="text-[11px] text-slate-500 leading-tight">{opt.hint}</div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 4. Searchable Category Selector + Create New Category */}
+              {/* 3. Searchable Category Selector + Create New Category */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label htmlFor="def-category-select" className="text-xs font-semibold text-slate-700">
-                    4. Category <span className="text-rose-600">*</span>
+                    Category <span className="text-rose-600">*</span>
                   </label>
                   <button
                     type="button"
@@ -922,7 +851,7 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
                     className="inline-flex items-center gap-1 text-xs font-semibold text-sky-700 hover:text-sky-900"
                   >
                     <Plus size={13} />
-                    Create New Category
+                    + Create New Category
                   </button>
                 </div>
 
@@ -950,17 +879,60 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
                   </select>
                 </div>
               </div>
+
+              {/* PRE-CREATION SUMMARY BLOCK */}
+              {definitionStep >= 4 && (
+                <div className="p-4 rounded-xl border border-sky-200 bg-sky-50/50 space-y-2 text-xs">
+                  <div className="font-bold text-sky-950 uppercase tracking-wider text-[11px]">
+                    Pre-Creation Summary
+                  </div>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    <div>
+                      <dt className="text-slate-500 font-medium">Integration Name:</dt>
+                      <dd className="font-semibold text-slate-900">{name.trim()}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500 font-medium">Category:</dt>
+                      <dd className="font-semibold text-slate-900">
+                        {categories.find((c) => c.id === categoryId)?.name ?? 'Scheduling'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500 font-medium">Owner:</dt>
+                      <dd className="font-semibold text-slate-900">{currentDeveloper.name}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500 font-medium">Status:</dt>
+                      <dd className="font-semibold text-sky-700">Draft</dd>
+                    </div>
+                    <div className="col-span-2 pt-1">
+                      <dt className="text-slate-500 font-medium">Description:</dt>
+                      <dd className="text-slate-700 leading-snug">{description.trim()}</dd>
+                    </div>
+                  </dl>
+                </div>
+              )}
             </div>
 
-            {/* 5. Review & Create Draft Integration CTA */}
+            {/* Pre-Creation Buttons: Back, Cancel, Create Integration */}
             <div className="pt-4 border-t border-slate-200 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={onCancelCreation}
-                className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleStepBackAnswer}
+                  className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={onCancelCreation}
+                  className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={handleCreateDraft}
@@ -969,12 +941,11 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
                   !name.trim() ||
                   Boolean(duplicateNameConflict) ||
                   description.trim().length < 8 ||
-                  uiLayers.length === 0 ||
                   !categoryId
                 }
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors disabled:opacity-40 whitespace-nowrap"
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors disabled:opacity-40 whitespace-nowrap shadow-xs"
               >
-                {draftIntegration ? 'Save Draft & Continue to Docs' : 'Create Draft Integration'}
+                {creatingDraft ? 'Creating Integration...' : 'Create Integration'}
                 <ArrowRight size={14} />
               </button>
             </div>
@@ -988,14 +959,29 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
       {wizardStage === 2 && draftIntegration && (
         <div className="space-y-6">
           <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
+            {/* Feature 5 Required Heading & Metadata Summary */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">Configure Data Source</h2>
-                <p className="text-xs text-slate-600">
-                  Server-side validator enforces HTTPS, blocks localhost/private SSRF targets, and
-                  verifies substantive API endpoint &amp; authentication evidence before unlocking
-                  Proceed.
-                </p>
+              <div className="space-y-1">
+                <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                  Connect {draftIntegration.name} API Documentation
+                </h2>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                  <div>
+                    <span className="font-semibold text-slate-700">Name:</span> {draftIntegration.name}
+                  </div>
+                  <span aria-hidden="true" className="text-slate-300">·</span>
+                  <div>
+                    <span className="font-semibold text-slate-700">Category:</span> {categories.find((c) => c.id === draftIntegration.categoryId)?.name ?? 'Scheduling'}
+                  </div>
+                  <span aria-hidden="true" className="text-slate-300">·</span>
+                  <div>
+                    <span className="font-semibold text-slate-700">Owner:</span> {currentDeveloper.name}
+                  </div>
+                  <span aria-hidden="true" className="text-slate-300">·</span>
+                  <div className="truncate max-w-xs" title={draftIntegration.description}>
+                    <span className="font-semibold text-slate-700">Description:</span> {draftIntegration.description}
+                  </div>
+                </div>
               </div>
 
               {/* Source Mode Tabs */}

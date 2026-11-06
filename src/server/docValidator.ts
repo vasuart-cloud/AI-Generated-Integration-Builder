@@ -890,7 +890,7 @@ export async function validateApiDocumentation(
       hash: docHash,
       result: 'invalid',
       summaryMessage:
-        'This appears to be a general website, not an API reference. Please provide developer/API documentation containing endpoints, authentication and response formats.',
+        'This URL does not appear to contain usable API documentation. Provide an API reference or OpenAPI specification.',
       evidence: emptyInvalidEvidence(
         checks,
         [

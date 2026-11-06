@@ -136,7 +136,7 @@ export interface Integration {
   iconKey: string;
   description: string;
   categoryId: string;
-  uiLayers: UILayer[];
+  uiLayers?: UILayer[];
   ownerId: string | null;
   sourceType: SourceType;
   isDefault: boolean;

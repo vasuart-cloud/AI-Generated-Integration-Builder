@@ -9,6 +9,7 @@ import {
   FolderKanban,
   HelpCircle,
   LayoutDashboard,
+  LogOut,
   Menu,
   PlayCircle,
   PlusCircle,
@@ -30,6 +31,7 @@ import { CatalogView } from './components/CatalogView';
 import { CodeWorkspaceView } from './components/CodeWorkspaceView';
 import { CreateIntegrationFlow } from './components/CreateIntegrationFlow';
 import { GuidedDemoDrawer } from './components/GuidedDemoDrawer';
+import { LoginPage } from './components/LoginPage';
 import { OnboardingModal } from './components/OnboardingModal';
 import { OverviewView } from './components/OverviewView';
 import { SettingsView } from './components/SettingsView';
@@ -54,12 +56,18 @@ interface ToastItem {
 
 const STORAGE_ACTOR_KEY = 'ce_studio_demo_actor_id';
 const STORAGE_NAV_KEY = 'ce_studio_nav_state';
+const STORAGE_AUTH_SESSION_KEY = 'ce_studio_demo_authenticated_user';
 
 export default function App() {
   const isAutostart = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('autostart') === '1';
   }, []);
+
+  // Demo Authentication Session (Persisted in sessionStorage across browser refreshes)
+  const [authenticatedUser, setAuthenticatedUser] = useState<string | null>(() => {
+    return window.sessionStorage.getItem(STORAGE_AUTH_SESSION_KEY);
+  });
 
   const [actorId, setActorId] = useState<string>(() => {
     return window.localStorage.getItem(STORAGE_ACTOR_KEY) || 'dev-asha';
@@ -100,13 +108,16 @@ export default function App() {
   const [loadingBootstrap, setLoadingBootstrap] = useState<boolean>(true);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
-  // Overlays & Menus
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
-  const [onboardingAutoCheckedForActor, setOnboardingAutoCheckedForActor] =
-    useState<string>('');
+  // Feature 1: Developer Onboarding Modal displays immediately on login and EVERY TIME developer refreshes browser while authenticated
+  // Implemented using application initialization state (true if authenticatedUser exists), not persistent completion state
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
+    return Boolean(window.sessionStorage.getItem(STORAGE_AUTH_SESSION_KEY));
+  });
+
   const [showGuidedDemo, setShowGuidedDemo] = useState<boolean>(false);
   const [showHelpMenu, setShowHelpMenu] = useState<boolean>(false);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showUserProfileMenu, setShowUserProfileMenu] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [quickSearch, setQuickSearch] = useState<string>('');
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -150,20 +161,13 @@ export default function App() {
   }, [actorId]);
 
   useEffect(() => {
+    if (!authenticatedUser) {
+      setLoadingBootstrap(false);
+      return;
+    }
     setLoadingBootstrap(true);
     loadBootstrap(actorId);
-  }, [actorId, loadBootstrap]);
-
-  // Open onboarding automatically on first visit for a developer (unless ?autostart=1)
-  useEffect(() => {
-    if (!bootstrap) return;
-    if (onboardingAutoCheckedForActor === bootstrap.currentDeveloper.id) return;
-    setOnboardingAutoCheckedForActor(bootstrap.currentDeveloper.id);
-
-    if (!isAutostart && !bootstrap.currentDeveloper.preferences.onboardingCompleted) {
-      setShowOnboarding(true);
-    }
-  }, [bootstrap, isAutostart, onboardingAutoCheckedForActor]);
+  }, [authenticatedUser, actorId, loadBootstrap]);
 
   const handleSwitchDeveloper = (nextActorId: string) => {
     window.localStorage.setItem(STORAGE_ACTOR_KEY, nextActorId);
@@ -174,6 +178,23 @@ export default function App() {
       'info',
       `Switched Demo Identity to ${nextActorId === 'dev-asha' ? 'Asha Patel (Developer A)' : 'Ravi Menon (Developer B)'}.`
     );
+  };
+
+  const handleLoginSuccess = (username: string) => {
+    window.sessionStorage.setItem(STORAGE_AUTH_SESSION_KEY, username);
+    setAuthenticatedUser(username);
+    // Redirect to Integration Catalog landing page
+    setActiveView('catalog');
+    setActiveIntegrationId(null);
+    // Display onboarding modal immediately
+    setShowOnboarding(true);
+  };
+
+  const handleLogout = () => {
+    window.sessionStorage.removeItem(STORAGE_AUTH_SESSION_KEY);
+    setAuthenticatedUser(null);
+    setShowOnboarding(false);
+    setShowUserProfileMenu(false);
   };
 
   const handleUpdatePreferences = async (patch: Partial<DeveloperPreferences>) => {
@@ -300,6 +321,11 @@ export default function App() {
     { id: 'traces', label: 'Traces', icon: <TerminalSquare size={16} /> },
     { id: 'settings', label: 'Settings', icon: <Settings size={16} /> },
   ];
+
+  // Feature 1: Route protection - display login page when opened without active demo session
+  if (!authenticatedUser) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
 
   if (loadingBootstrap && !bootstrap) {
     return (
@@ -640,6 +666,53 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* User Profile & Logout Menu */}
+            <div className="relative">
+              <button
+                type="button"
+                aria-label={`User profile menu for ${currentDeveloper.name}`}
+                onClick={() => {
+                  setShowUserProfileMenu((v) => !v);
+                  setShowHelpMenu(false);
+                  setShowNotifications(false);
+                }}
+                className="flex items-center gap-2 pl-1.5 pr-2 py-1 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <div className="w-7 h-7 rounded-full bg-sky-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
+                  {currentDeveloper.avatarInitials || 'AP'}
+                </div>
+                <span className="text-xs font-semibold hidden md:inline">{currentDeveloper.name}</span>
+              </button>
+
+              {showUserProfileMenu && (
+                <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-lg p-2 z-40 text-xs space-y-1">
+                  <div className="px-3 py-2 border-b border-slate-100">
+                    <p className="font-semibold text-slate-900">{currentDeveloper.name}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{currentDeveloper.email}</p>
+                    <p className="text-[10px] text-sky-700 font-medium mt-0.5">{currentDeveloper.roleTitle}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUserProfileMenu(false);
+                      setShowOnboarding(true);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 font-medium text-slate-800"
+                  >
+                    Open Onboarding Tour
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-rose-50 text-rose-700 font-semibold flex items-center gap-2"
+                  >
+                    <LogOut size={14} />
+                    Logout
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -860,11 +933,10 @@ export default function App() {
         </main>
       </div>
 
-      {/* First-Run / Replayable 3-Step Developer Onboarding Wizard */}
+      {/* First-Run / On-Refresh Developer Onboarding Modal */}
       {showOnboarding && (
         <OnboardingModal
           developer={currentDeveloper}
-          onSavePreferences={handleUpdatePreferences}
           onClose={() => setShowOnboarding(false)}
           onExploreCatalog={() => handleNavigate('catalog')}
           onCreateFirstIntegration={() => handleNavigate('create', { integrationId: null })}
