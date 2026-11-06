@@ -10,7 +10,13 @@ import { evaluateIntegrationAccess, redactSensitiveData } from './src/server/sec
 import { StudioHttpError, StudioStore } from './src/server/store';
 
 const PORT = 3000;
-const store = new StudioStore();
+// Vercel functions have a read-only deployment filesystem. Demo state is in-memory;
+// connect a durable store before using this beyond the shareable prototype.
+const store = new StudioStore({ filePath: process.env.VERCEL ? null : undefined });
+
+// Export the Express app so Vercel can deploy it as a Node.js Function.
+// Keep the explicit listener below for Google AI Studio/local development.
+export default createApiApp(store);
 
 function getActorIdFromRequest(req: Request): string {
   const headerActor = req.header('x-developer-id')?.trim();
