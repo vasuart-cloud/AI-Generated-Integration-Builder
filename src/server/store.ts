@@ -1000,18 +1000,23 @@ export class StudioStore {
     // genuinely re-run the affected verification/security stage so the run transitions to failed/blocked with a trace!
     if (failureInjection !== 'none' && (run.status === 'ready_for_review' || run.status === 'validated')) {
       const steps = this.getRunSteps(run.id);
+      // Resolve fault scenarios to CURRENT pipeline agent IDs. Legacy IDs
+      // (security_reviewer, test_packaging_agent, etc.) do not exist in the
+      // seven-stage pipeline and previously caused simulated failures to be
+      // silently skipped, leaving runs incorrectly marked ready_for_review.
       const targetAgent =
-        failureInjection === 'unsafe_pagination_redirect' || failureInjection === 'security_blocking_issue'
-          ? 'security_reviewer'
-          : failureInjection === 'auth_401' || failureInjection === 'permission_403'
-          ? 'auth_agent'
+        failureInjection === 'auth_401' || failureInjection === 'permission_403'
+          ? 'auth_client_agent'
           : failureInjection === 'provider_500' || failureInjection === 'model_unavailable'
-          ? 'client_code_agent'
+          ? 'user_usage_agent'
           : failureInjection === 'interrupted_run'
-          ? 'resilience_agent'
-          : 'test_packaging_agent';
+          ? 'error_pagination_agent'
+          : 'security_testing_agent';
 
-      const targetOrder = AGENT_PIPELINE.find((p) => p.agentId === targetAgent)?.sequenceOrder ?? 8;
+      const targetOrder = AGENT_PIPELINE.find((p) => p.agentId === targetAgent)?.sequenceOrder;
+      if (!targetOrder) {
+        throw new StudioHttpError(500, 'INVALID_AGENT_PIPELINE', 'Could not resolve a current agent for fault injection.');
+      }
       for (const s of steps) {
         if (s.sequenceOrder >= targetOrder) {
           s.status = 'queued';
