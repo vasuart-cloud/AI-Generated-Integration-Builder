@@ -46,63 +46,56 @@ export const AGENT_PIPELINE: Array<{
   approvalAfter?: ApprovalStage;
 }> = [
   {
-    agentId: 'orchestrator',
-    agentName: 'Orchestrator',
+    agentId: 'doc_ingestion',
+    agentName: 'Documentation Ingestion Agent',
     sequenceOrder: 1,
     dependsOn: [],
     usesModel: false,
   },
   {
-    agentId: 'doc_analyst',
-    agentName: 'Documentation Analyst',
+    agentId: 'capability_discovery',
+    agentName: 'Capability Discovery Agent',
     sequenceOrder: 2,
-    dependsOn: ['orchestrator'],
+    dependsOn: ['doc_ingestion'],
     usesModel: true,
   },
   {
-    agentId: 'capability_agent',
-    agentName: 'Capability & Mapping Agent',
+    agentId: 'integration_planner',
+    agentName: 'Integration Planning Agent',
     sequenceOrder: 3,
-    dependsOn: ['doc_analyst'],
+    dependsOn: ['capability_discovery'],
     usesModel: true,
     approvalAfter: 'capabilities_scope',
   },
   {
-    agentId: 'auth_agent',
-    agentName: 'Authentication Agent',
+    agentId: 'auth_client_agent',
+    agentName: 'Authentication and API Client Agent',
     sequenceOrder: 4,
-    dependsOn: ['capability_agent'],
+    dependsOn: ['integration_planner'],
     usesModel: true,
     approvalAfter: 'auth_permissions',
   },
   {
-    agentId: 'client_code_agent',
-    agentName: 'Client Code Agent',
+    agentId: 'user_usage_agent',
+    agentName: 'User and Usage Code Generation Agent',
     sequenceOrder: 5,
-    dependsOn: ['auth_agent'],
+    dependsOn: ['auth_client_agent'],
     usesModel: true,
   },
   {
-    agentId: 'resilience_agent',
-    agentName: 'Resilience Agent',
+    agentId: 'error_pagination_agent',
+    agentName: 'Error Handling and Pagination Agent',
     sequenceOrder: 6,
-    dependsOn: ['client_code_agent'],
+    dependsOn: ['user_usage_agent'],
     usesModel: true,
   },
   {
-    agentId: 'security_reviewer',
-    agentName: 'Security Reviewer',
+    agentId: 'security_testing_agent',
+    agentName: 'Security and Testing Agent',
     sequenceOrder: 7,
-    dependsOn: ['resilience_agent'],
+    dependsOn: ['error_pagination_agent'],
     usesModel: false,
     approvalAfter: 'code_security_review',
-  },
-  {
-    agentId: 'test_packaging_agent',
-    agentName: 'Test & Packaging Agent',
-    sequenceOrder: 8,
-    dependsOn: ['security_reviewer'],
-    usesModel: false,
   },
 ];
 
@@ -177,7 +170,7 @@ function buildApprovalCard(params: {
       integrationId: run.integrationId,
       stage,
       title: 'Approval #1 — API Capabilities, Derived Proxy & Unavailable Fields',
-      gateAgentId: 'capability_agent',
+      gateAgentId: 'integration_planner',
       requestedAction:
         'Confirm documented endpoints, accept 30-day scheduled-events count strictly as a derived activity proxy, and acknowledge excluded unavailable fields before auth/code synthesis.',
       riskLevel: 'medium',
@@ -192,7 +185,7 @@ function buildApprovalCard(params: {
         'Paid-license utilization, purchased seat caps & billed usage — NOT available in source API; excluded.',
         '30-day scheduled-events count will be explicitly typed as derived_scheduling_activity_proxy.',
       ],
-      requestedBy: 'Capability & Mapping Agent',
+      requestedBy: 'Integration Planning Agent',
       status: 'pending',
       requestedAt: now,
     };
@@ -205,7 +198,7 @@ function buildApprovalCard(params: {
       integrationId: run.integrationId,
       stage,
       title: 'Approval #2 — Authentication Method & Least-Privilege Read-Only Scopes',
-      gateAgentId: 'auth_agent',
+      gateAgentId: 'auth_client_agent',
       requestedAction: `Approve ${run.collectorConfig.authType} configuration via environment variable injection with strictly read-only scopes (${run.collectorConfig.scopes.join(', ')}) before generating client/auth code.`,
       riskLevel: 'high',
       evidenceItems: [
@@ -218,7 +211,7 @@ function buildApprovalCard(params: {
       unavailableDisclosures: [
         'Write/delete scopes are disallowed in CloudEagle Developer Integration Studio MVP.',
       ],
-      requestedBy: 'Authentication Agent',
+      requestedBy: 'Authentication and API Client Agent',
       status: 'pending',
       requestedAt: now,
     };
@@ -230,7 +223,7 @@ function buildApprovalCard(params: {
     integrationId: run.integrationId,
     stage: 'code_security_review',
     title: 'Approval #3 — Generated Code & Security Review Sign-Off',
-    gateAgentId: 'security_reviewer',
+    gateAgentId: 'security_testing_agent',
     requestedAction:
       'Review static SSRF, pagination host-allowlist, secret-redaction, and generated TypeScript modules before running fixture validation & final packaging.',
     riskLevel: 'medium',
@@ -243,9 +236,9 @@ function buildApprovalCard(params: {
     ],
     affectedArtifacts: artifacts.map((a) => a.path),
     unavailableDisclosures: [
-      'Approval marks package eligible for fixture validation & ZIP export—it does NOT trigger production deployment.',
+      'Approval marks package eligible for sandbox verification & ZIP export—it does NOT trigger production deployment.',
     ],
-    requestedBy: 'Security Reviewer',
+    requestedBy: 'Security and Testing Agent',
     status: 'pending',
     requestedAt: now,
   };
@@ -263,7 +256,13 @@ function shouldFailAgentForInjection(
 } | null {
   switch (injection) {
     case 'model_unavailable':
-      if (agentId === 'doc_analyst' || agentId === 'client_code_agent') {
+      if (
+        agentId === 'capability_discovery' ||
+        agentId === 'integration_planner' ||
+        agentId === 'user_usage_agent' ||
+        agentId === 'doc_analyst' ||
+        agentId === 'client_code_agent'
+      ) {
         return {
           code: 'MODEL_UNAVAILABLE_503',
           title: 'Simulated Fault: Selected LLM Provider Unavailable',
@@ -276,12 +275,12 @@ function shouldFailAgentForInjection(
       }
       return null;
     case 'provider_500':
-      if (agentId === 'client_code_agent') {
+      if (agentId === 'user_usage_agent' || agentId === 'client_code_agent') {
         return {
           code: 'UPSTREAM_500',
           title: 'Simulated Fault: Provider 500 Internal Error',
           message:
-            'Demo Lab Simulation: Model gateway encountered HTTP 500 during Client Code synthesis after bounded retries.',
+            'Demo Lab Simulation: Model gateway encountered HTTP 500 during Code synthesis after bounded retries.',
           remediation:
             'Clear the 5xx fault toggle in Demo Lab and click Retry Step; prior checkpoints and approvals are preserved.',
           classification: 'UPSTREAM_5XX_ERROR',
@@ -289,20 +288,20 @@ function shouldFailAgentForInjection(
       }
       return null;
     case 'interrupted_run':
-      if (agentId === 'resilience_agent') {
+      if (agentId === 'error_pagination_agent' || agentId === 'resilience_agent') {
         return {
           code: 'RUN_INTERRUPTED',
           title: 'Simulated Fault: Worker Connection Interrupted Mid-Stage',
           message:
-            'Demo Lab Simulation: Execution worker interrupted before Resilience Agent checkpoint finalized. Client Code files remain intact.',
+            'Demo Lab Simulation: Execution worker interrupted before Error Handling & Pagination checkpoint finalized.',
           remediation:
-            'Clear the "Interrupted Run" toggle and click Resume or Retry Step to rerun only the unfinished Resilience Agent stage.',
+            'Clear the "Interrupted Run" toggle and click Resume or Retry Step to rerun only the unfinished stage.',
           classification: 'EXECUTION_INTERRUPTED',
         };
       }
       return null;
     case 'auth_401':
-      if (agentId === 'auth_agent') {
+      if (agentId === 'auth_client_agent' || agentId === 'auth_agent') {
         return {
           code: 'AUTH_401_SIMULATED',
           title: 'Simulated Fault: HTTP 401 Invalid / Expired Token Contract',
@@ -315,7 +314,7 @@ function shouldFailAgentForInjection(
       }
       return null;
     case 'permission_403':
-      if (agentId === 'auth_agent') {
+      if (agentId === 'auth_client_agent' || agentId === 'auth_agent') {
         return {
           code: 'PERMISSION_403_SIMULATED',
           title: 'Simulated Fault: HTTP 403 Missing Organization Read Scope',
@@ -328,7 +327,7 @@ function shouldFailAgentForInjection(
       }
       return null;
     case 'unsafe_pagination_redirect':
-      if (agentId === 'security_reviewer') {
+      if (agentId === 'security_testing_agent' || agentId === 'security_reviewer') {
         return {
           code: 'SECURITY_UNSAFE_PAGINATION_HOST',
           title: 'Blocking Security Issue: Cross-Origin Pagination Redirect',
@@ -341,7 +340,7 @@ function shouldFailAgentForInjection(
       }
       return null;
     case 'security_blocking_issue':
-      if (agentId === 'security_reviewer') {
+      if (agentId === 'security_testing_agent' || agentId === 'security_reviewer') {
         return {
           code: 'SECURITY_HARDCODED_SECRET',
           title: 'Blocking Security Issue: Secret Literal / Unsafe Pattern Detected',
@@ -354,20 +353,20 @@ function shouldFailAgentForInjection(
       }
       return null;
     case 'rate_limit_429':
-      if (agentId === 'test_packaging_agent') {
+      if (agentId === 'security_testing_agent' || agentId === 'test_packaging_agent') {
         return {
           code: 'RATE_LIMIT_429_EXHAUSTED',
           title: 'Simulated Fault: HTTP 429 Rate Limit Exhausted in Fixture Validation',
           message:
             'Demo Lab Simulation: Upstream returned persistent HTTP 429 Too Many Requests with Retry-After: 12s across all 3 bounded retry attempts.',
           remediation:
-            'Inspect Retry-After backoff trace, clear the 429 fault in Demo Lab, and click Retry Step on Test & Packaging Agent.',
+            'Inspect Retry-After backoff trace, clear the 429 fault in Demo Lab, and click Retry Step.',
           classification: 'HTTP_429_RATE_LIMITED',
         };
       }
       return null;
     case 'invalid_schema':
-      if (agentId === 'test_packaging_agent') {
+      if (agentId === 'security_testing_agent' || agentId === 'test_packaging_agent') {
         return {
           code: 'INVALID_RESPONSE_SCHEMA',
           title: 'Simulated Fault: Upstream JSON Schema Mismatch',
@@ -503,7 +502,7 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
         remediation: injectedFault.remediation,
       };
 
-      const isSecurityBlock = stageSpec.agentId === 'security_reviewer';
+      const isSecurityBlock = stageSpec.agentId === 'security_testing_agent' || stageSpec.agentId === 'security_reviewer';
       run.status = isSecurityBlock ? 'blocked' : 'failed';
       integration.status = isSecurityBlock ? 'blocked' : 'failed';
 
@@ -545,54 +544,82 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
     let outputsRef: string[] = [];
     let evidenceLinks: string[] = validation.evidence.sourceLinks.slice(0, 2);
 
-    if (stageSpec.agentId === 'orchestrator') {
-      inputsRef = [`validation:${validation.id}`, `model:${run.modelId}`];
-      outputsRef = ['execution_dag_v1', 'checkpoint_manifest'];
-      defaultSummary = `Initialized 8-stage execution graph for ${integration.name} using ${
-        run.isSimulatedModel ? `${run.modelId} (simulated)` : `${run.modelProvider}:${run.modelId}`
-      } with 3 mandatory human approval gates.`;
-    } else if (stageSpec.agentId === 'doc_analyst') {
+    if (stageSpec.agentId === 'doc_ingestion' || stageSpec.agentId === 'orchestrator') {
       inputsRef = [validation.sourceUrl, `sha256:${validation.hash}`];
-      outputsRef = validation.evidence.documentedEndpoints.map((e) => `${e.method} ${e.path}`);
-      defaultSummary = `Verified ${validation.evidence.documentedEndpoints.length} grounded REST endpoints (${outputsRef.join(
-        ', '
-      )}) against ${validation.mode === 'curated_fixture' ? 'curated sandbox fixture' : 'fetched source'}.`;
-    } else if (stageSpec.agentId === 'capability_agent') {
+      outputsRef = ['normalized_api_spec', `endpoints:${validation.evidence.documentedEndpoints.length}`];
+      defaultSummary = `Ingested API documentation from ${validation.sourceUrl} (${validation.mode}). Verified HTTPS safety, SSRF guards, and bounded extraction.`;
+    } else if (stageSpec.agentId === 'capability_discovery' || stageSpec.agentId === 'doc_analyst') {
       inputsRef = validation.evidence.documentedEndpoints.map((e) => `${e.method} ${e.path}`);
-      outputsRef = ['capability_matrix', 'derived_proxy_disclosure', 'unsupported_fields_list'];
+      outputsRef = ['capability_matrix', 'schema_definitions', 'field_mappings'];
+      defaultSummary = `Discovered ${validation.evidence.documentedEndpoints.length} grounded endpoints: /users/me (current user context), /organization_memberships (member inventory), and /scheduled_events (scheduling activity).`;
+    } else if (stageSpec.agentId === 'integration_planner' || stageSpec.agentId === 'capability_agent') {
+      inputsRef = ['capability_matrix', 'schema_definitions'];
+      outputsRef = ['architecture_plan', 'derived_proxy_disclosure', 'unsupported_fields_list'];
       defaultSummary =
         'Mapped /organization_memberships for member inventory and /scheduled_events as a 30-day derived scheduling-activity proxy; marked login timestamps and paid seat utilization unavailable in source.';
-    } else if (stageSpec.agentId === 'auth_agent') {
-      inputsRef = [validation.evidence.authEvidence.headerFormat];
-      outputsRef = ['auth_env_contract', ...run.collectorConfig.scopes];
-      defaultSummary = `Designed ${run.collectorConfig.authType} Bearer injection via environment variable with least-privilege read-only scopes (${run.collectorConfig.scopes.join(
-        ', '
-      )}).`;
-    } else if (stageSpec.agentId === 'client_code_agent') {
-      const clientSpecs = allFileSpecs.filter((f) => f.producedByAgent === 'client_code_agent');
-      inputsRef = ['capability_matrix', 'auth_env_contract'];
-      outputsRef = clientSpecs.map((f) => f.path);
-      for (const spec of clientSpecs) {
+    } else if (stageSpec.agentId === 'auth_client_agent' || stageSpec.agentId === 'auth_agent') {
+      const authSpecs = allFileSpecs.filter(
+        (f) =>
+          f.path.includes('auth.ts') ||
+          f.path.includes('apiClient.ts') ||
+          f.path.includes('.env.example')
+      );
+      inputsRef = [validation.evidence.authEvidence.headerFormat, ...run.collectorConfig.scopes];
+      outputsRef = authSpecs.map((f) => f.path);
+      for (const spec of authSpecs) {
         upsertArtifact(artifacts, integration.id, run, spec.path, spec.language, spec.content);
         markSubtask(run, `file:${spec.path}`);
       }
-      defaultSummary = `Generated ${clientSpecs.length} typed TypeScript client, user, and derived-activity modules (${outputsRef.join(
+      defaultSummary = `Generated typed API client and ${run.collectorConfig.authType} authentication modules (${outputsRef.join(
         ', '
-      )}) with per-file checkpoints.`;
-    } else if (stageSpec.agentId === 'resilience_agent') {
-      const resSpecs = allFileSpecs.filter((f) => f.producedByAgent === 'resilience_agent');
+      )}) with least-privilege read-only scopes (${run.collectorConfig.scopes.join(', ')}).`;
+    } else if (stageSpec.agentId === 'user_usage_agent' || stageSpec.agentId === 'client_code_agent') {
+      const userUsageSpecs = allFileSpecs.filter(
+        (f) =>
+          f.path.includes('types.ts') ||
+          f.path.includes('users.ts') ||
+          f.path.includes('usage.ts') ||
+          f.path.includes('mapping.ts')
+      );
+      inputsRef = ['src/apiClient.ts', 'derived_proxy_contract'];
+      outputsRef = userUsageSpecs.map((f) => f.path);
+      for (const spec of userUsageSpecs) {
+        upsertArtifact(artifacts, integration.id, run, spec.path, spec.language, spec.content);
+        markSubtask(run, `file:${spec.path}`);
+      }
+      defaultSummary = `Generated user and usage data retrieval modules (${outputsRef.join(
+        ', '
+      )}) implementing canonical mapping and explicit 30-day scheduled-events derived activity proxy.`;
+    } else if (stageSpec.agentId === 'error_pagination_agent' || stageSpec.agentId === 'resilience_agent') {
+      const errorPaginationSpecs = allFileSpecs.filter(
+        (f) =>
+          f.path.includes('errors.ts') ||
+          f.path.includes('pagination.ts') ||
+          f.path.includes('logger.ts')
+      );
       inputsRef = ['src/apiClient.ts', `host:${allowedHost}`];
-      outputsRef = resSpecs.map((f) => f.path);
-      for (const spec of resSpecs) {
+      outputsRef = errorPaginationSpecs.map((f) => f.path);
+      for (const spec of errorPaginationSpecs) {
         upsertArtifact(artifacts, integration.id, run, spec.path, spec.language, spec.content);
         markSubtask(run, `file:${spec.path}`);
       }
-      defaultSummary = `Implemented typed 400/401/403/404/429/5xx error taxonomy, Retry-After + jitter backoff, ${allowedHost} pagination host guard, and PII/token-redacted JSON logger.`;
-    } else if (stageSpec.agentId === 'security_reviewer') {
-      const preliminaryChecks = verifyCodeArtifacts(artifacts, allowedHost, run.activeFailureInjection);
-      const blockingSec = preliminaryChecks.find((c) => c.category === 'security_guard' && !c.passed);
-      inputsRef = artifacts.map((a) => a.path);
-      outputsRef = ['security_audit_report'];
+      defaultSummary = `Implemented typed 400/401/403/404/429/5xx error taxonomy, Retry-After + jitter backoff, ${allowedHost} pagination host guard, cycle detection, and PII/token-redacted JSON logger.`;
+    } else if (stageSpec.agentId === 'security_testing_agent' || stageSpec.agentId === 'security_reviewer' || stageSpec.agentId === 'test_packaging_agent') {
+      const testSpecs = allFileSpecs.filter(
+        (f) =>
+          f.path.includes('test') ||
+          f.path.includes('manifest') ||
+          f.path.includes('README') ||
+          f.path.includes('package.json') ||
+          f.path.includes('tsconfig.json')
+      );
+      for (const spec of testSpecs) {
+        upsertArtifact(artifacts, integration.id, run, spec.path, spec.language, spec.content);
+        markSubtask(run, `file:${spec.path}`);
+      }
+      const verifications = verifyCodeArtifacts(artifacts, allowedHost, run.activeFailureInjection);
+      run.verificationResults = verifications;
+      const blockingSec = verifications.find((c) => c.category === 'security_guard' && !c.passed);
       if (blockingSec) {
         step.status = 'failed';
         step.completedAt = new Date().toISOString();
@@ -614,7 +641,7 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
           type: 'error_event',
           message: blockingSec.detail,
           errorClassification: 'SECURITY_REVIEW_FAILURE',
-          recommendedAction: 'Remediate security violation in generated files and retry Security Reviewer.',
+          recommendedAction: 'Remediate security violation in generated files and retry Security & Testing Agent.',
           metadata: { failedCheck: blockingSec.name },
         });
         traces.push(secTrace);
@@ -622,21 +649,12 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
           code: 'SECURITY_REVIEW_BLOCKED',
           title: 'Security Reviewer Blocked Package',
           message: blockingSec.detail,
-          failedAgentId: 'security_reviewer',
+          failedAgentId: step.agentId,
           remediation: 'Fix the security finding in the Code Workspace and retry.',
           traceId: secTrace.id,
         };
         return;
       }
-      defaultSummary = `Inspected ${artifacts.length} generated modules: 0 hardcoded credentials, HTTPS enforced, cross-origin pagination blocked outside ${allowedHost}, and log redaction active.`;
-    } else if (stageSpec.agentId === 'test_packaging_agent') {
-      const pkgSpecs = allFileSpecs.filter((f) => f.producedByAgent === 'test_packaging_agent');
-      for (const spec of pkgSpecs) {
-        upsertArtifact(artifacts, integration.id, run, spec.path, spec.language, spec.content);
-        markSubtask(run, `file:${spec.path}`);
-      }
-      const verifications = verifyCodeArtifacts(artifacts, allowedHost, run.activeFailureInjection);
-      run.verificationResults = verifications;
       const failedCheck = verifications.find((v) => !v.passed);
       if (failedCheck) {
         step.status = 'failed';
@@ -659,7 +677,7 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
           type: 'verification',
           message: failedCheck.detail,
           errorClassification: 'VERIFICATION_CHECK_FAILED',
-          recommendedAction: 'Fix failing contract/fixture check and retry Test & Packaging Agent.',
+          recommendedAction: 'Fix failing contract/fixture check and retry Security & Testing Agent.',
           metadata: { checkName: failedCheck.name },
         });
         traces.push(failTrace);
@@ -667,7 +685,7 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
           code: 'VERIFICATION_FAILED',
           title: 'Verification Check Failed',
           message: failedCheck.detail,
-          failedAgentId: 'test_packaging_agent',
+          failedAgentId: step.agentId,
           remediation: 'Review trace and verification panel, then retry step.',
           traceId: failTrace.id,
         };
@@ -675,7 +693,7 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
       }
       inputsRef = artifacts.map((a) => a.path);
       outputsRef = ['tests/connector.test.ts', 'integration.manifest.json', 'README.md', 'ZIP archive ready'];
-      defaultSummary = `Passed ${verifications.length}/${verifications.length} static contract, security, and fixture unit checks; packaged ${artifacts.length} files (v${run.codeVersion}) for review and ZIP export.`;
+      defaultSummary = `Passed ${verifications.length}/${verifications.length} static contract, security, and fixture unit checks; packaged ${artifacts.length} files (v${run.codeVersion}) for review, sandbox testing, and ZIP export.`;
     }
 
     // If a real non-simulated Company Gemini model was chosen for a model-backed stage, invoke it on the server!

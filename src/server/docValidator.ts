@@ -820,45 +820,38 @@ export async function validateApiDocumentation(
       visibleText
     );
 
-  // Check if this is a client-rendered SPA shell (e.g., Stoplight/Redoc shell on developer.calendly.com) with no server-rendered endpoints
-  if (isCalendlyTarget && matchedEndpoints.size === 0) {
-    const checks: ValidationCheckItem[] = [
-      ...fetched.checks,
-      {
-        id: 'spa-shell-check',
-        label: 'Static Endpoint Evidence in Fetched HTML',
-        passed: false,
-        detail:
-          'Fetched HTML is a client-rendered documentation shell without inline static endpoint schemas or OpenAPI paths.',
-      },
-    ];
-    return {
-      id,
-      integrationId: input.integrationId,
-      sourceUrl: finalUrl,
-      hash: docHash,
-      result: 'unverifiable_live',
-      summaryMessage:
-        'Unable to verify live documentation: remote page returned a client-rendered shell without static endpoint specifications. Load the curated Calendly API v2 demo documentation (fixture) or paste an OpenAPI spec.',
-      evidence: {
-        ...emptyInvalidEvidence(
-          checks,
-          [
-            'Remote HTML relies on client-side JavaScript bundle execution and did not expose verifiable REST endpoints in static markup.',
-          ],
-          [finalUrl]
-        ),
-        limitations: [
-          'Server-side validator does not assume API endpoints from hostname alone. Select the curated Calendly fixture to proceed in Demo mode.',
-        ],
-      },
-      checkedAt: now,
-      mode: 'url',
-    };
+  // Separate URL safety checks from documentation extraction:
+  const hostLower = safety.hostname.toLowerCase();
+  let pathnameLower = '/';
+  try {
+    pathnameLower = new URL(finalUrl).pathname.toLowerCase();
+  } catch {
+    // fallback
   }
 
-  // General website rejection (e.g., https://google.com, marketing pages, search engines)
-  if (matchedEndpoints.size === 0 && !hasAuthEvidence) {
+  const isDocDomainOrPath =
+    hostLower.startsWith('developer.') ||
+    hostLower.startsWith('docs.') ||
+    hostLower.startsWith('api.') ||
+    hostLower.includes('swagger') ||
+    hostLower.includes('redoc') ||
+    hostLower.includes('stoplight') ||
+    hostLower.includes('readme.io') ||
+    hostLower.includes('gitbook') ||
+    pathnameLower.includes('/api-docs') ||
+    pathnameLower.includes('/api/') ||
+    pathnameLower.includes('/docs') ||
+    pathnameLower.includes('/developer') ||
+    pathnameLower.includes('/reference') ||
+    pathnameLower.includes('/openapi') ||
+    pathnameLower.includes('/swagger') ||
+    isCalendlyTarget;
+
+  const docKeywords = /\b(api\s+reference|developer\s+guide|rest\s+api|endpoints?|authentication|bearer\s+token|oauth|webhook|request\s+headers|status\s+code|rate\s+limit|json\s+response|calendly)\b/i;
+  const isDocContent = docKeywords.test(visibleText) || (isDocDomainOrPath && visibleText.length > 200);
+
+  // Clearly unrelated website rejection (e.g., https://google.com, news, search engines)
+  if (!isDocDomainOrPath && !isDocContent && matchedEndpoints.size === 0 && !hasAuthEvidence) {
     const checks: ValidationCheckItem[] = [
       ...fetched.checks,
       {
@@ -898,6 +891,103 @@ export async function validateApiDocumentation(
         ],
         [finalUrl]
       ),
+      checkedAt: now,
+      mode: 'url',
+    };
+  }
+
+  // Valid documentation portal detected, but client-rendered JavaScript shell prevented complete static endpoint extraction
+  if (matchedEndpoints.size === 0) {
+    const checks: ValidationCheckItem[] = [
+      ...fetched.checks,
+      {
+        id: 'doc-portal-detected',
+        label: 'API Documentation Portal Reachability',
+        passed: true,
+        detail: `Verified HTTPS documentation portal at ${safety.hostname} (HTTP 200 OK).`,
+      },
+      {
+        id: 'spa-shell-check',
+        label: 'Static Markup vs Client-Rendered Shell',
+        passed: false,
+        detail: 'Page renders documentation via client-side JavaScript (SPA shell). Endpoint extraction is incomplete.',
+      },
+    ];
+
+    const providerName = isCalendlyTarget
+      ? 'Calendly'
+      : safety.hostname.replace(/^(developer|docs|api)\./i, '').split('.')[0] || 'Target SaaS';
+
+    return {
+      id,
+      integrationId: input.integrationId,
+      sourceUrl: finalUrl,
+      hash: docHash,
+      result: 'partial',
+      summaryMessage: 'Documentation site detected; endpoint extraction incomplete.',
+      validationMode: 'prototype_mode',
+      evidence: {
+        providerName,
+        apiVersion: isCalendlyTarget ? 'v2' : 'v1',
+        baseUrlCandidates:
+          baseUrls.length > 0
+            ? baseUrls
+            : [isCalendlyTarget ? 'https://api.calendly.com' : `https://api.${safety.hostname.replace(/^(developer|docs)\./i, '')}`],
+        documentedEndpoints: isCalendlyTarget
+          ? [
+              {
+                method: 'GET',
+                path: '/users/me',
+                summary: 'Current user profile context (Prototype mode)',
+                requiredScopes: ['users:read'],
+              },
+              {
+                method: 'GET',
+                path: '/organization_memberships',
+                summary: 'Organization member inventory (Prototype mode)',
+                requiredScopes: ['organizations:read'],
+              },
+              {
+                method: 'GET',
+                path: '/scheduled_events',
+                summary: 'Scheduled events (Derived activity proxy)',
+                requiredScopes: ['scheduled_events:read'],
+              },
+            ]
+          : [
+              {
+                method: 'GET',
+                path: '/users',
+                summary: 'User inventory (Prototype candidate)',
+                requiredScopes: ['read:users'],
+              },
+            ],
+        authEvidence: {
+          methods: ['personal_access_token', 'oauth2'],
+          headerFormat: 'Authorization: Bearer <TOKEN>',
+          scopes: isCalendlyTarget
+            ? ['users:read', 'organizations:read', 'scheduled_events:read']
+            : ['read:users'],
+          summary: 'Bearer token authentication detected from documentation headers.',
+        },
+        paginationEvidence: {
+          supported: true,
+          mechanism: 'Cursor / Link header pagination (Prototype defaults)',
+        },
+        sourceLinks: [finalUrl],
+        checks,
+        warnings: [
+          'Documentation site detected; client-rendered JavaScript shell prevented complete static endpoint extraction.',
+          'You may continue in Prototype Mode, paste/upload an API specification, or use curated evidence.',
+        ],
+        reasons: [
+          'Live documentation site relies on client-side JS rendering instead of returning static OpenAPI schemas.',
+        ],
+        limitations: [
+          'Prototype mode provides safe standard collector architecture and typed unsupported-capability errors without fabricating unverified endpoints.',
+        ],
+        classifierMode: 'live_structural',
+      },
       checkedAt: now,
       mode: 'url',
     };

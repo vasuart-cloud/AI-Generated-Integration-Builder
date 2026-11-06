@@ -20,7 +20,14 @@ export interface GeneratedFileSpec {
   path: string;
   language: CodeArtifact['language'];
   content: string;
-  producedByAgent: 'client_code_agent' | 'resilience_agent' | 'test_packaging_agent';
+  producedByAgent:
+    | 'auth_client_agent'
+    | 'user_usage_agent'
+    | 'error_pagination_agent'
+    | 'security_testing_agent'
+    | 'client_code_agent'
+    | 'resilience_agent'
+    | 'test_packaging_agent';
 }
 
 export function generateIntegrationFileSpecs(params: {

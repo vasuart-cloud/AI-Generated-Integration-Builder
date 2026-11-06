@@ -48,6 +48,14 @@ export type RunStatus =
   | 'blocked';
 
 export type AgentId =
+  | 'doc_ingestion'
+  | 'capability_discovery'
+  | 'integration_planner'
+  | 'auth_client_agent'
+  | 'user_usage_agent'
+  | 'error_pagination_agent'
+  | 'security_testing_agent'
+  // Backward-compatibility aliases
   | 'orchestrator'
   | 'doc_analyst'
   | 'capability_agent'
@@ -56,6 +64,154 @@ export type AgentId =
   | 'resilience_agent'
   | 'security_reviewer'
   | 'test_packaging_agent';
+
+export type SandboxScenarioId =
+  | 'successful_authentication'
+  | 'expired_token_401'
+  | 'missing_permissions_403'
+  | 'invalid_endpoint_404'
+  | 'rate_limiting_429'
+  | 'server_errors_500_503'
+  | 'network_timeout'
+  | 'invalid_response_schema'
+  | 'empty_missing_data'
+  | 'pagination_loop'
+  | 'unsafe_pagination_redirect'
+  | 'secret_leakage_detection';
+
+export type SandboxTestStatus = 'pass' | 'fail' | 'not_run' | 'simulated';
+
+export interface SandboxTestCase {
+  id: SandboxScenarioId;
+  name: string;
+  category: 'authentication' | 'resilience' | 'schema' | 'security' | 'pagination';
+  status: SandboxTestStatus;
+  logs: string[];
+  traceId: string;
+  errorExplanation?: string;
+  recommendedRemediation?: string;
+  isCriticalSecurity: boolean;
+  executedAt?: string;
+}
+
+export const SANDBOX_SCENARIO_DEFINITIONS: Array<{
+  id: SandboxScenarioId;
+  name: string;
+  category: SandboxTestCase['category'];
+  description: string;
+  isCriticalSecurity: boolean;
+}> = [
+  {
+    id: 'successful_authentication',
+    name: 'Successful Authentication',
+    category: 'authentication',
+    description: 'Verifies Bearer token header injection and HTTP 200 user profile parsing.',
+    isCriticalSecurity: true,
+  },
+  {
+    id: 'expired_token_401',
+    name: 'Expired Token (HTTP 401)',
+    category: 'authentication',
+    description: 'Simulates expired/invalid Bearer token; verifies non-retryable AuthenticationError is thrown.',
+    isCriticalSecurity: true,
+  },
+  {
+    id: 'missing_permissions_403',
+    name: 'Missing Permissions (HTTP 403)',
+    category: 'authentication',
+    description: 'Simulates missing required OAuth scopes; verifies PermissionDeniedError with scope disclosure.',
+    isCriticalSecurity: true,
+  },
+  {
+    id: 'invalid_endpoint_404',
+    name: 'Invalid Endpoint (HTTP 404)',
+    category: 'resilience',
+    description: 'Simulates non-existent API subresource; verifies NotFoundError without unhandled crash.',
+    isCriticalSecurity: false,
+  },
+  {
+    id: 'rate_limiting_429',
+    name: 'Rate Limiting (HTTP 429)',
+    category: 'resilience',
+    description: 'Simulates 429 response with Retry-After header; verifies backoff and bounded retry policy.',
+    isCriticalSecurity: false,
+  },
+  {
+    id: 'server_errors_500_503',
+    name: 'Server Errors (HTTP 500 / 503)',
+    category: 'resilience',
+    description: 'Simulates upstream transient outages; verifies bounded exponential retry before halting.',
+    isCriticalSecurity: false,
+  },
+  {
+    id: 'network_timeout',
+    name: 'Network Timeout Guard',
+    category: 'resilience',
+    description: 'Simulates stalled network response; verifies AbortSignal terminates within configured timeoutMs.',
+    isCriticalSecurity: false,
+  },
+  {
+    id: 'invalid_response_schema',
+    name: 'Invalid Response Schema',
+    category: 'schema',
+    description: 'Simulates unexpected JSON payload; verifies SchemaValidationError with actionable message.',
+    isCriticalSecurity: false,
+  },
+  {
+    id: 'empty_missing_data',
+    name: 'Empty / Missing Data Handling',
+    category: 'schema',
+    description: 'Simulates empty collection ([]); verifies safe default handling without null pointer exceptions.',
+    isCriticalSecurity: false,
+  },
+  {
+    id: 'pagination_loop',
+    name: 'Pagination Loop Detection',
+    category: 'pagination',
+    description: 'Simulates cyclic cursor token; verifies visited-token detector terminates without infinite loop.',
+    isCriticalSecurity: true,
+  },
+  {
+    id: 'unsafe_pagination_redirect',
+    name: 'Unsafe Cross-Origin Pagination Redirect',
+    category: 'pagination',
+    description: 'Simulates malicious cross-host next_page link; verifies host-allowlist blocks SSRF exfiltration.',
+    isCriticalSecurity: true,
+  },
+  {
+    id: 'secret_leakage_detection',
+    name: 'Secret Leakage Detection & PII Redaction',
+    category: 'security',
+    description: 'Scans telemetry and exception traces; verifies tokens, keys, and email PII are completely redacted.',
+    isCriticalSecurity: true,
+  },
+];
+
+export type ProductionReadinessStatus =
+  | 'draft'
+  | 'docs_accepted'
+  | 'code_generated'
+  | 'pending_review'
+  | 'sandbox_testing'
+  | 'tests_failed'
+  | 'ready_for_production_review';
+
+export interface ProductionReadinessCheck {
+  id: string;
+  title: string;
+  passed: boolean;
+  detail: string;
+  category: 'documentation' | 'permissions' | 'credentials' | 'security_scan' | 'sandbox' | 'code_review' | 'approval' | 'operations';
+}
+
+export interface ProductionReadinessReport {
+  status: ProductionReadinessStatus;
+  checks: ProductionReadinessCheck[];
+  allChecksPassed: boolean;
+  canMarkReadyForReview: boolean;
+  markedReadyAt?: string;
+  markedReadyBy?: string;
+}
 
 export type AgentStepStatus =
   | 'queued'
@@ -144,6 +300,9 @@ export interface Integration {
   apiDocSource?: ApiDocSource;
   collectorConfig?: CollectorConfig;
   latestRunId?: string;
+  productionReadinessStatus?: ProductionReadinessStatus;
+  productionApprovedBy?: string;
+  productionApprovedAt?: string;
   createdAt: string;
   updatedAt: string;
   version: number;
@@ -202,6 +361,8 @@ export interface DocumentationValidation {
   evidence: ValidationEvidence;
   checkedAt: string;
   mode: DocInputMode;
+  prototypeConfirmed?: boolean;
+  validationMode?: 'live_url' | 'prototype_mode' | 'curated_fixture' | 'openapi_spec';
 }
 
 export interface CapabilityItem {
@@ -354,6 +515,8 @@ export interface GenerationRun {
     traceId: string;
   };
   verificationResults: VerificationCheckResult[];
+  sandboxResults?: SandboxTestCase[];
+  productionReadiness?: ProductionReadinessReport;
   operationTokens: string[];
   startedAt: string;
   updatedAt: string;

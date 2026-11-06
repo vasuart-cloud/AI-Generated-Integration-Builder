@@ -25,6 +25,7 @@ import {
 } from './calendlyFixture';
 import { verifyCodeArtifacts } from './codeGenerator';
 import { getModelRegistry } from './modelRegistry';
+import { executeSandboxTests, evaluateProductionReadiness } from './sandboxRunner';
 import { evaluateIntegrationAccess, redactSensitiveData } from './security';
 import {
   advanceGenerationRun,
@@ -499,6 +500,70 @@ export class StudioStore {
     );
     this.persist();
     return { validation, capabilities };
+  }
+
+  public confirmPrototypeMode(
+    actorId: string,
+    integrationId: string
+  ): {
+    validation: DocumentationValidation;
+    capabilities: ReturnType<typeof discoverCapabilitiesFromValidation>;
+    integration: Integration;
+  } {
+    const actor = this.getDeveloperOrThrow(actorId);
+    const integration = this.getIntegrationOrThrow(integrationId);
+    const access = evaluateIntegrationAccess(actor.id, integration);
+    if (!access.canEdit) {
+      throw new StudioHttpError(403, 'FORBIDDEN_PROTOTYPE_CONFIRM', access.reason);
+    }
+
+    const latest = this.listValidationsForIntegration(integration.id)[0];
+    if (!latest) {
+      throw new StudioHttpError(404, 'NO_VALIDATION_FOUND', 'Validate documentation before confirming prototype mode.');
+    }
+
+    latest.result = 'valid';
+    latest.validationMode = 'prototype_mode';
+    latest.prototypeConfirmed = true;
+    latest.summaryMessage =
+      'Prototype Mode active: Endpoint extraction incomplete; standard prototype capabilities approved with developer oversight.';
+
+    const capabilities = discoverCapabilitiesFromValidation(latest);
+    integration.apiDocSource = {
+      mode: latest.mode,
+      url: latest.sourceUrl,
+      validatedValidationId: latest.id,
+      validatedHash: latest.hash,
+    };
+    integration.collectorConfig = integration.collectorConfig ?? capabilities.defaultConfig;
+    integration.status = 'docs_validated';
+    integration.updatedAt = new Date().toISOString();
+
+    this.state.traces.unshift({
+      id: `trc-${crypto.randomUUID().slice(0, 10)}`,
+      runId: integration.latestRunId ?? `doccheck-${integration.id}`,
+      integrationId: integration.id,
+      level: 'info',
+      type: 'doc_validation',
+      message: `${actor.name} confirmed Prototype Mode for "${integration.name}". Endpoint extraction incomplete; continuing with documented prototype capabilities under developer oversight.`,
+      requestId: `req-${crypto.randomUUID().slice(0, 8)}`,
+      sanitizedMetadata: {
+        sourceUrl: latest.sourceUrl,
+        mode: latest.mode,
+        prototypeConfirmed: true,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    this.recordAudit(
+      actor,
+      'docs.prototype_confirmed',
+      'validation',
+      latest.id,
+      `Confirmed prototype mode for "${integration.name}".`
+    );
+    this.persist();
+    return { validation: latest, capabilities, integration };
   }
 
   public getLatestValidValidation(integrationId: string): DocumentationValidation | undefined {
@@ -1226,6 +1291,156 @@ export class StudioStore {
     );
     this.persist();
     return { artifact, run };
+  }
+
+  public runSandboxTests(
+    actorId: string,
+    runId: string,
+    targetScenarioId?: string
+  ): {
+    results: any[];
+    allPassed: boolean;
+    hasCriticalFailure: boolean;
+    productionReadiness: any;
+  } {
+    const actor = this.getDeveloperOrThrow(actorId);
+    const run = this.getRunOrThrow(runId);
+    const integration = this.getIntegrationOrThrow(run.integrationId);
+    const access = evaluateIntegrationAccess(actor.id, integration);
+    if (!access.canView) {
+      throw new StudioHttpError(403, 'FORBIDDEN_SANDBOX_RUN', access.reason);
+    }
+
+    const artifacts = this.getRunArtifacts(run.id);
+    if (artifacts.length === 0) {
+      throw new StudioHttpError(
+        422,
+        'NO_ARTIFACTS_FOR_TEST',
+        'Code generation must complete before running sandbox tests.'
+      );
+    }
+
+    const validation = this.state.validations.find((v) => v.id === run.validationId);
+    const allowedHost = (() => {
+      try {
+        return new URL(validation?.evidence.baseUrlCandidates[0] || 'https://api.calendly.com').hostname;
+      } catch {
+        return 'api.calendly.com';
+      }
+    })();
+
+    const testExecution = executeSandboxTests({
+      run,
+      artifacts,
+      allowedHost,
+      targetScenarioId,
+    });
+
+    run.sandboxResults = testExecution.results;
+
+    const readinessReport = evaluateProductionReadiness({
+      integration,
+      run,
+      artifacts,
+      sandboxResults: testExecution.results,
+    });
+    run.productionReadiness = readinessReport;
+    integration.productionReadinessStatus = readinessReport.status;
+
+    this.state.traces.unshift({
+      id: `trc-${crypto.randomUUID().slice(0, 10)}`,
+      runId: run.id,
+      integrationId: integration.id,
+      level: testExecution.hasCriticalFailure ? 'security' : testExecution.allPassed ? 'info' : 'warn',
+      type: 'verification',
+      message: targetScenarioId
+        ? `Retried sandbox test scenario "${targetScenarioId}": ${testExecution.results.find((r) => r.id === targetScenarioId)?.status.toUpperCase()}`
+        : `Executed 12 Simulated Sandbox Tests: ${testExecution.results.filter((r) => r.status === 'pass').length}/12 passed.`,
+      requestId: `req-${crypto.randomUUID().slice(0, 8)}`,
+      sanitizedMetadata: {
+        allPassed: testExecution.allPassed,
+        hasCriticalFailure: testExecution.hasCriticalFailure,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    this.persist();
+    return {
+      results: testExecution.results,
+      allPassed: testExecution.allPassed,
+      hasCriticalFailure: testExecution.hasCriticalFailure,
+      productionReadiness: readinessReport,
+    };
+  }
+
+  public markProductionReady(
+    actorId: string,
+    integrationId: string,
+    runId: string
+  ): {
+    integration: Integration;
+    report: any;
+  } {
+    const actor = this.getDeveloperOrThrow(actorId);
+    const integration = this.getIntegrationOrThrow(integrationId);
+    const run = this.getRunOrThrow(runId);
+    const access = evaluateIntegrationAccess(actor.id, integration);
+    if (!access.canEdit) {
+      throw new StudioHttpError(403, 'FORBIDDEN_PRODUCTION_APPROVAL', access.reason);
+    }
+
+    const artifacts = this.getRunArtifacts(run.id);
+    const report = evaluateProductionReadiness({
+      integration,
+      run,
+      artifacts,
+      sandboxResults: run.sandboxResults ?? [],
+    });
+
+    if (!report.canMarkReadyForReview) {
+      throw new StudioHttpError(
+        400,
+        'READINESS_CHECKS_INCOMPLETE',
+        'Cannot mark ready for production review: one or more security or sandbox criteria failed.'
+      );
+    }
+
+    const now = new Date().toISOString();
+    integration.productionApprovedBy = actor.id;
+    integration.productionApprovedAt = now;
+    integration.productionReadinessStatus = 'ready_for_production_review';
+    integration.updatedAt = now;
+
+    report.status = 'ready_for_production_review';
+    report.markedReadyAt = now;
+    report.markedReadyBy = actor.id;
+    run.productionReadiness = report;
+
+    this.recordAudit(
+      actor,
+      'integration.production_ready_demo',
+      'integration',
+      integration.id,
+      `Marked "${integration.name}" Ready for Production Review (Demo Only). All 12 sandbox tests and safeguards confirmed.`
+    );
+
+    this.state.traces.unshift({
+      id: `trc-${crypto.randomUUID().slice(0, 10)}`,
+      runId: run.id,
+      integrationId: integration.id,
+      level: 'info',
+      type: 'agent_action',
+      message: `${actor.name} approved Production Readiness (Demo Only) for "${integration.name}". Package is prepared for Enterprise Review.`,
+      requestId: `req-${crypto.randomUUID().slice(0, 8)}`,
+      sanitizedMetadata: {
+        approvedBy: actor.name,
+        approvedAt: now,
+      },
+      timestamp: now,
+    });
+
+    this.persist();
+    return { integration, report };
   }
 
   public getTraces(filters: {

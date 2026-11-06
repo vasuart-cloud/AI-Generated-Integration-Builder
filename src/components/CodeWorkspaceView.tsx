@@ -1,15 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
+  ArrowRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Download,
   ExternalLink,
   FileCode2,
   FileJson,
   FileText,
+  FlaskConical,
   GitCompare,
   Lock,
+  Play,
   Redo2,
+  RefreshCw,
   RotateCcw,
   Save,
   ShieldCheck,
@@ -21,7 +28,12 @@ import {
   RunDetailPayload,
   studioApi,
 } from '../lib/api';
-import { CodeArtifact, GenerationRun } from '../shared/types';
+import {
+  CodeArtifact,
+  GenerationRun,
+  SANDBOX_SCENARIO_DEFINITIONS,
+  SandboxTestCase,
+} from '../shared/types';
 
 interface CodeWorkspaceViewProps {
   actorId: string;
@@ -56,6 +68,11 @@ export const CodeWorkspaceView: React.FC<CodeWorkspaceViewProps> = ({
   const effectiveRunId = selectedRunId ?? runsWithCode[0]?.id ?? runs[0]?.id ?? null;
 
   const [detail, setDetail] = useState<RunDetailPayload | null>(null);
+  const [workspaceTab, setWorkspaceTab] = useState<'editor' | 'sandbox' | 'readiness'>('editor');
+  const [runningSandbox, setRunningSandbox] = useState<boolean>(false);
+  const [retryingScenarioId, setRetryingScenarioId] = useState<string | null>(null);
+  const [markingReadiness, setMarkingReadiness] = useState<boolean>(false);
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activePath, setActivePath] = useState<string>('src/apiClient.ts');
   const [historyByPath, setHistoryByPath] = useState<Record<string, EditorHistoryState>>({});
@@ -116,6 +133,11 @@ export const CodeWorkspaceView: React.FC<CodeWorkspaceViewProps> = ({
     detail?.integration ?? integrations.find((i) => i.id === detail?.run.integrationId);
   const canEdit = integration?.access.canEdit ?? false;
   const run = detail?.run;
+  const sandboxResults = useMemo(() => run?.sandboxResults ?? [], [run]);
+  const passedSandboxCount = useMemo(
+    () => sandboxResults.filter((s) => s.status === 'pass').length,
+    [sandboxResults]
+  );
 
   const handleOpenFile = (path: string) => {
     setActivePath(path);
@@ -261,6 +283,94 @@ export const CodeWorkspaceView: React.FC<CodeWorkspaceViewProps> = ({
       onNotify('error', err instanceof Error ? err.message : 'ZIP download failed.');
     } finally {
       setDownloadingZip(false);
+    }
+  };
+
+  const handleRunAllSandboxTests = async () => {
+    if (!run) return;
+    setRunningSandbox(true);
+    try {
+      const res = await studioApi.runSandboxTests(actorId, run.id);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              run: {
+                ...prev.run,
+                sandboxResults: res.results,
+                productionReadiness: res.productionReadiness,
+              },
+            }
+          : null
+      );
+      await onRefreshBootstrap();
+      if (res.allPassed) {
+        onNotify('success', 'All 12 Simulated Sandbox Test scenarios passed successfully.');
+      } else {
+        onNotify(
+          'info',
+          `Executed sandbox tests: ${res.results.filter((r) => r.status === 'pass').length}/12 passed.`
+        );
+      }
+    } catch (err) {
+      onNotify('error', err instanceof Error ? err.message : 'Sandbox test execution failed.');
+    } finally {
+      setRunningSandbox(false);
+    }
+  };
+
+  const handleRetryScenario = async (scenarioId: string) => {
+    if (!run) return;
+    setRetryingScenarioId(scenarioId);
+    try {
+      const res = await studioApi.runSandboxTests(actorId, run.id, scenarioId);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              run: {
+                ...prev.run,
+                sandboxResults: res.results,
+                productionReadiness: res.productionReadiness,
+              },
+            }
+          : null
+      );
+      await onRefreshBootstrap();
+      const updated = res.results.find((r) => r.id === scenarioId);
+      onNotify(
+        updated?.status === 'pass' ? 'success' : 'error',
+        `Scenario ${scenarioId}: ${updated?.status.toUpperCase()}`
+      );
+    } catch (err) {
+      onNotify('error', err instanceof Error ? err.message : 'Retry failed.');
+    } finally {
+      setRetryingScenarioId(null);
+    }
+  };
+
+  const handleMarkReadyForProduction = async () => {
+    if (!run || !integration) return;
+    setMarkingReadiness(true);
+    try {
+      const res = await studioApi.markReadyForProductionReview(actorId, integration.id, run.id);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              run: {
+                ...prev.run,
+                productionReadiness: res.report,
+              },
+            }
+          : null
+      );
+      await onRefreshBootstrap();
+      onNotify('success', `Marked "${integration.name}" Ready for Production Review (Demo Only).`);
+    } catch (err) {
+      onNotify('error', err instanceof Error ? err.message : 'Action failed.');
+    } finally {
+      setMarkingReadiness(false);
     }
   };
 

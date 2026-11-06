@@ -203,6 +203,17 @@ export function createApiApp(activeStore: StudioStore = store) {
     }
   });
 
+  // Confirm Prototype Mode Endpoint
+  app.post('/api/integrations/:id/confirm-prototype', (req, res, next) => {
+    try {
+      const actorId = getActorIdFromRequest(req);
+      const result = activeStore.confirmPrototypeMode(actorId, req.params.id);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // Capability Discovery Endpoint
   app.get('/api/integrations/:id/capabilities', (req, res, next) => {
     try {
@@ -430,8 +441,48 @@ export function createApiApp(activeStore: StudioStore = store) {
     }
   });
 
+  // Sandbox Tests Endpoint
+  app.post('/api/runs/:runId/sandbox-tests', (req, res, next) => {
+    try {
+      const actorId = getActorIdFromRequest(req);
+      const result = activeStore.runSandboxTests(
+        actorId,
+        req.params.runId,
+        typeof req.body?.scenarioId === 'string' ? req.body.scenarioId : undefined
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Production Readiness Approval (Demo) Endpoint
+  app.post('/api/integrations/:id/production-readiness', (req, res, next) => {
+    try {
+      const actorId = getActorIdFromRequest(req);
+      const runId = String(req.body?.runId ?? '').trim();
+      if (!runId) {
+        throw new StudioHttpError(400, 'RUN_ID_REQUIRED', 'Generation run ID is required.');
+      }
+      const result = activeStore.markProductionReady(actorId, req.params.id, runId);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Explicit 404 for unmatched /api/* calls so they never fall through to Vite index.html
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      error: {
+        code: 'API_ENDPOINT_NOT_FOUND',
+        message: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+      },
+    });
+  });
+
   // Global API Error Handler
-  app.use('/api', (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof StudioHttpError) {
       res.status(err.statusCode).json({
         error: {

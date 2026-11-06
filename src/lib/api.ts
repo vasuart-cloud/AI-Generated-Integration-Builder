@@ -15,6 +15,8 @@ import {
   GenerationRun,
   Integration,
   ModelOption,
+  ProductionReadinessReport,
+  SandboxTestCase,
   TraceEvent,
   UILayer,
 } from '../shared/types';
@@ -65,31 +67,61 @@ async function requestJson<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   headers.set('x-developer-id', actorId);
+  headers.set('Accept', 'application/json');
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(url, {
-    ...init,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers,
+    });
+  } catch (netErr) {
+    throw new ClientApiError(
+      0,
+      'NETWORK_ERROR',
+      netErr instanceof Error ? netErr.message : 'Network request failed. Dev server may be restarting.'
+    );
+  }
+
+  const rawText = await res.text();
+  let parsed: any = null;
+  if (rawText && rawText.trim().length > 0) {
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      parsed = null;
+    }
+  }
 
   if (!res.ok) {
     let code = `HTTP_${res.status}`;
     let message = `Request failed with status ${res.status}`;
-    try {
-      const errBody = await res.json();
-      if (errBody?.error) {
-        code = errBody.error.code || code;
-        message = errBody.error.message || message;
-      }
-    } catch {
-      // Fallback to status message
+    if (parsed && typeof parsed === 'object' && parsed.error) {
+      code = parsed.error.code || code;
+      message = parsed.error.message || message;
+    } else if (rawText && !rawText.trim().startsWith('<')) {
+      message = rawText.slice(0, 300);
+    } else {
+      message = `Server returned HTTP ${res.status} error.`;
     }
     throw new ClientApiError(res.status, code, message);
   }
 
-  return (await res.json()) as T;
+  if (parsed === null) {
+    if (rawText && rawText.trim().startsWith('<')) {
+      throw new ClientApiError(
+        res.status,
+        'HTML_RESPONSE_ERROR',
+        `Unexpected HTML response (${res.status}) from ${url}. Expected JSON.`
+      );
+    }
+    return {} as T;
+  }
+
+  return parsed as T;
 }
 
 export const studioApi = {
@@ -318,6 +350,53 @@ export const studioApi = {
     if (filters.level) qs.set('level', filters.level);
     if (filters.search) qs.set('search', filters.search);
     return requestJson(`/api/traces?${qs.toString()}`, actorId);
+  },
+
+  confirmPrototypeMode(
+    actorId: string,
+    integrationId: string
+  ): Promise<{
+    validation: DocumentationValidation;
+    discovery: {
+      capabilities: CapabilityItem[];
+      fieldMappings: FieldMappingItem[];
+      defaultConfig: CollectorConfig;
+    };
+    integration: Integration;
+  }> {
+    return requestJson(`/api/integrations/${encodeURIComponent(integrationId)}/confirm-prototype`, actorId, {
+      method: 'POST',
+    });
+  },
+
+  runSandboxTests(
+    actorId: string,
+    runId: string,
+    scenarioId?: string
+  ): Promise<{
+    results: SandboxTestCase[];
+    allPassed: boolean;
+    hasCriticalFailure: boolean;
+    productionReadiness: ProductionReadinessReport;
+  }> {
+    return requestJson(`/api/runs/${encodeURIComponent(runId)}/sandbox-tests`, actorId, {
+      method: 'POST',
+      body: JSON.stringify({ scenarioId }),
+    });
+  },
+
+  markReadyForProductionReview(
+    actorId: string,
+    integrationId: string,
+    runId: string
+  ): Promise<{
+    integration: Integration;
+    report: ProductionReadinessReport;
+  }> {
+    return requestJson(`/api/integrations/${encodeURIComponent(integrationId)}/production-readiness`, actorId, {
+      method: 'POST',
+      body: JSON.stringify({ runId }),
+    });
   },
 
   resetWorkspace(actorId: string): Promise<{ ok: boolean }> {

@@ -16,6 +16,7 @@ import {
   Plus,
   Send,
   ShieldCheck,
+  Sparkles,
   Upload,
   X,
 } from 'lucide-react';
@@ -487,9 +488,31 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
       : 'fixture:calendly';
 
   const canProceedFromDocs =
-    currentValidation?.result === 'valid' &&
-    (currentValidation.mode === 'curated_fixture' ||
-      lastValidatedSourceKey === currentSourceFingerprint);
+    (currentValidation?.result === 'valid' &&
+      (currentValidation.mode === 'curated_fixture' ||
+        Boolean(currentValidation.prototypeConfirmed) ||
+        lastValidatedSourceKey === currentSourceFingerprint)) ||
+    Boolean(currentValidation?.prototypeConfirmed);
+
+  const handleConfirmPrototype = async () => {
+    if (!draftIntegration) return;
+    setValidatingDocs(true);
+    try {
+      const res = await studioApi.confirmPrototypeMode(actorId, draftIntegration.id);
+      setCurrentValidation(res.validation);
+      setLastValidatedSourceKey(`prototype:${draftIntegration.id}`);
+      if (res.capabilities) {
+        setCapabilities(res.capabilities.capabilities);
+        setFieldMappings(res.capabilities.fieldMappings);
+        setCollectorConfig(res.capabilities.defaultConfig);
+      }
+      onNotify('success', 'Prototype mode confirmed. Proceed to Capability Discovery.');
+    } catch (err) {
+      onNotify('error', err instanceof Error ? err.message : 'Failed to confirm prototype mode.');
+    } finally {
+      setValidatingDocs(false);
+    }
+  };
 
   const runDocValidation = async (
     overrideMode?: DocInputMode,
@@ -1224,6 +1247,65 @@ export const CreateIntegrationFlow: React.FC<CreateIntegrationFlowProps> = ({
                       <p className="text-xs text-slate-800 leading-relaxed">
                         {currentValidation.summaryMessage}
                       </p>
+
+                      {/* Prototype Mode Actions for Incomplete Extraction */}
+                      {(currentValidation.result === 'partial' ||
+                        currentValidation.result === 'unverifiable_live' ||
+                        currentValidation.prototypeConfirmed) && (
+                        <div className="mt-3 p-3.5 bg-amber-100/70 border border-amber-300 rounded-lg space-y-2.5 text-xs text-amber-950">
+                          <div className="font-semibold text-amber-900 flex items-center gap-1.5">
+                            <AlertTriangle size={14} className="text-amber-700 shrink-0" />
+                            {currentValidation.prototypeConfirmed
+                              ? 'Prototype Mode Active (Developer Confirmed)'
+                              : 'Documentation site detected; endpoint extraction incomplete.'}
+                          </div>
+                          <p className="leading-relaxed">
+                            {currentValidation.prototypeConfirmed
+                              ? 'You have approved proceeding in Prototype Mode with standard endpoint capabilities under developer oversight. Proceed to Capability Discovery is enabled.'
+                              : 'The documentation portal was safely verified via HTTPS, but dynamic JavaScript rendering prevented static extraction of all endpoints. You can proceed safely in Prototype Mode with curated/standard endpoints, upload/paste an OpenAPI spec, or use the curated Calendly fixture.'}
+                          </p>
+
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            {!currentValidation.prototypeConfirmed && (
+                              <button
+                                type="button"
+                                onClick={handleConfirmPrototype}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 font-semibold text-xs text-white bg-amber-700 hover:bg-amber-800 rounded-md transition-colors"
+                              >
+                                <CheckCircle2 size={13} />
+                                Continue in Prototype Mode
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDocMode('openapi_paste');
+                                setCurrentValidation(null);
+                              }}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 font-medium text-xs text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors"
+                            >
+                              <FileCode2 size={13} />
+                              Paste or Upload API Specification
+                            </button>
+
+                            {(docUrl.toLowerCase().includes('calendly') ||
+                              draftIntegration?.name.toLowerCase().includes('calendly')) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDocMode('curated_fixture');
+                                  runDocValidation('curated_fixture');
+                                }}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 font-medium text-xs text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors"
+                              >
+                                <Sparkles size={13} />
+                                Use Curated Calendly API v2 Evidence
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
