@@ -938,30 +938,29 @@ export async function validateApiDocumentation(
               {
                 method: 'GET',
                 path: '/users/me',
-                summary: 'Current user profile context (Prototype mode)',
+                summary: 'Current user profile context (Curated prototype candidate; not live-extracted)',
                 requiredScopes: ['users:read'],
+                citationUrl: 'https://developer.calendly.com/api-docs/calendly-api/users/get-current-user',
+                responseFields: ['resource.uri', 'resource.name', 'resource.email'],
               },
               {
                 method: 'GET',
                 path: '/organization_memberships',
-                summary: 'Organization member inventory (Prototype mode)',
+                summary: 'Organization member inventory (Curated prototype candidate; not live-extracted)',
                 requiredScopes: ['organizations:read'],
+                citationUrl: 'https://developer.calendly.com/api-docs/calendly-api/organizations/list-organization-memberships',
+                responseFields: ['collection', 'pagination'],
               },
               {
                 method: 'GET',
                 path: '/scheduled_events',
-                summary: 'Scheduled events (Derived activity proxy)',
+                summary: 'Scheduled events (Derived activity proxy; not paid-seat usage)',
                 requiredScopes: ['scheduled_events:read'],
+                citationUrl: 'https://developer.calendly.com/api-docs/calendly-api/scheduled-events/list-scheduled-events',
+                responseFields: ['collection', 'pagination'],
               },
             ]
-          : [
-              {
-                method: 'GET',
-                path: '/users',
-                summary: 'User inventory (Prototype candidate)',
-                requiredScopes: ['read:users'],
-              },
-            ],
+          : [],
         authEvidence: {
           methods: ['personal_access_token', 'oauth2'],
           headerFormat: 'Authorization: Bearer <TOKEN>',
