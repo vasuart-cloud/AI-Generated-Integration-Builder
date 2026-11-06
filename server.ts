@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'node:path';
-import { createServer as createViteServer } from 'vite';
 import { discoverCapabilitiesFromValidation } from './src/server/calendlyFixture';
 import { buildArtifactsZipBuffer } from './src/server/codeGenerator';
 import { validateApiDocumentation } from './src/server/docValidator';
@@ -514,6 +513,8 @@ async function startServer() {
   const app = createApiApp(store);
 
   if (process.env.NODE_ENV !== 'production') {
+    // Lazy import Vite only for local development. Never load Rolldown in Vercel functions.
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
