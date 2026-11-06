@@ -244,17 +244,7 @@ test('Multi-agent state machine enforces docs gate, 3 mandatory human approvals,
   // Regression: code-generation stage emits an entry point, not just its dependencies.
   assert.ok(store.getRunArtifacts(run.id).some((a) => a.path === 'src/index.ts'));
 
-  // Simulate an existing persisted run created before the missing-entrypoint fix.
-  // Verification must repair this known omission on retry without re-running earlier agents.
-  const legacyState = (store as unknown as {
-    state: { artifacts: Array<{ path: string; runId: string }> };
-  }).state;
-  legacyState.artifacts = legacyState.artifacts.filter(
-    (a) => !(a.runId === run.id && a.path === 'src/index.ts')
-  );
-  assert.ok(!store.getRunArtifacts(run.id).some((a) => a.path === 'src/index.ts'));
-
-  // Approve #3 -> the verifier repairs the entry point, then reaches ready_for_review!
+  // Approve #3 -> all required files are present and the run reaches ready_for_review!
   run = await store.submitApprovalDecision('dev-asha', run.id, apr3!.id, 'approve', 'Security checks clean.');
   assert.equal(run.status, 'ready_for_review');
 
@@ -280,6 +270,19 @@ test('Multi-agent state machine enforces docs gate, 3 mandatory human approvals,
   assert.equal(restoredSave.run.status, 'ready_for_review');
   assert.equal(restoredSave.artifact.isModifiedByDeveloper, false);
 
+  // Simulate a legacy persisted run missing the entry point after prior stages succeeded.
+  // The next failed verification retry should repair it without restarting upstream agents.
+  const legacyState = (store as unknown as {
+    state: { artifacts: Array<{ path: string; runId: string }> };
+  }).state;
+  legacyState.artifacts = legacyState.artifacts.filter(
+    (a) => !(a.runId === run.id && a.path === 'src/index.ts')
+  );
+  assert.ok(!store.getRunArtifacts(run.id).some((a) => a.path === 'src/index.ts'));
+  const previousUpstreamStepIds = store.getRunSteps(run.id)
+    .filter((step) => step.sequenceOrder < 7)
+    .map((step) => step.id);
+
   // Inject simulated 429 fault -> fails Test & Packaging Agent with trace, then clear & retry!
   const faultedRun = await store.setRunFailureInjection('dev-asha', run.id, 'rate_limit_429');
   assert.equal(faultedRun.status, 'failed');
@@ -287,6 +290,12 @@ test('Multi-agent state machine enforces docs gate, 3 mandatory human approvals,
 
   const retriedRun = await store.controlRun('dev-asha', run.id, 'retry', { failureInjection: 'none' });
   assert.equal(retriedRun.status, 'ready_for_review');
+  assert.ok(store.getRunArtifacts(run.id).some((a) => a.path === 'src/index.ts'),
+    'Retry must restore the missing connector entry point');
+  assert.deepEqual(store.getRunSteps(run.id)
+    .filter((step) => step.sequenceOrder < 7)
+    .map((step) => step.id), previousUpstreamStepIds);
+  assert.ok(retriedRun.verificationResults?.every((v) => v.passed));
 
   // Build real ZIP buffer and verify contents
   const zipBuf = await buildArtifactsZipBuffer(store.getRunArtifacts(run.id), 'calendly-connector-v3');
