@@ -502,7 +502,7 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
         remediation: injectedFault.remediation,
       };
 
-      const isSecurityBlock = stageSpec.agentId === 'security_testing_agent' || stageSpec.agentId === 'security_reviewer';
+      const isSecurityBlock = run.activeFailureInjection === 'unsafe_pagination_redirect' || run.activeFailureInjection === 'security_blocking_issue';
       run.status = isSecurityBlock ? 'blocked' : 'failed';
       integration.status = isSecurityBlock ? 'blocked' : 'failed';
 
