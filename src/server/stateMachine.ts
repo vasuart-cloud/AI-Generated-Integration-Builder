@@ -576,6 +576,8 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
     } else if (stageSpec.agentId === 'user_usage_agent' || stageSpec.agentId === 'client_code_agent') {
       const userUsageSpecs = allFileSpecs.filter(
         (f) =>
+          // The connector entry point must be emitted before verification.
+          f.path === 'src/index.ts' ||
           f.path.includes('types.ts') ||
           f.path.includes('users.ts') ||
           f.path.includes('usage.ts') ||
@@ -607,6 +609,9 @@ export async function advanceGenerationRun(ctx: AdvanceRunContext): Promise<void
     } else if (stageSpec.agentId === 'security_testing_agent' || stageSpec.agentId === 'security_reviewer' || stageSpec.agentId === 'test_packaging_agent') {
       const testSpecs = allFileSpecs.filter(
         (f) =>
+          // Recover persisted runs created before the code agent emitted the entry point.
+          // upsertArtifact preserves developer edits when this file already exists.
+          f.path === 'src/index.ts' ||
           f.path.includes('test') ||
           f.path.includes('manifest') ||
           f.path.includes('README') ||
