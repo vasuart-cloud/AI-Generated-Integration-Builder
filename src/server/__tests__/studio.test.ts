@@ -241,7 +241,20 @@ test('Multi-agent state machine enforces docs gate, 3 mandatory human approvals,
   const apr3 = approvals.find((a) => a.stage === 'code_security_review');
   assert.ok(apr3);
 
-  // Approve #3 -> runs Test & Packaging Agent and reaches ready_for_review!
+  // Regression: code-generation stage emits an entry point, not just its dependencies.
+  assert.ok(store.getRunArtifacts(run.id).some((a) => a.path === 'src/index.ts'));
+
+  // Simulate an existing persisted run created before the missing-entrypoint fix.
+  // Verification must repair this known omission on retry without re-running earlier agents.
+  const legacyState = (store as unknown as {
+    state: { artifacts: Array<{ path: string; runId: string }> };
+  }).state;
+  legacyState.artifacts = legacyState.artifacts.filter(
+    (a) => !(a.runId === run.id && a.path === 'src/index.ts')
+  );
+  assert.ok(!store.getRunArtifacts(run.id).some((a) => a.path === 'src/index.ts'));
+
+  // Approve #3 -> the verifier repairs the entry point, then reaches ready_for_review!
   run = await store.submitApprovalDecision('dev-asha', run.id, apr3!.id, 'approve', 'Security checks clean.');
   assert.equal(run.status, 'ready_for_review');
 
@@ -249,6 +262,8 @@ test('Multi-agent state machine enforces docs gate, 3 mandatory human approvals,
   assert.ok(artifacts.length >= 13);
   assert.ok(artifacts.some((a) => a.path === 'src/pagination.ts'));
   assert.ok(artifacts.some((a) => a.path === 'src/usage.ts'));
+  assert.ok(artifacts.some((a) => a.path === 'src/index.ts'), 'Entry point should be restored');
+  assert.ok(run.verificationResults?.every((v) => v.passed), 'All code checks should pass');
 
   // Edit a file with a hardcoded token -> Security Reviewer blocks!
   const authArtifact = artifacts.find((a) => a.path === 'src/auth.ts')!;
@@ -278,6 +293,7 @@ test('Multi-agent state machine enforces docs gate, 3 mandatory human approvals,
   const loadedZip = await JSZip.loadAsync(zipBuf);
   const zipPaths = Object.keys(loadedZip.files);
   assert.ok(zipPaths.some((p) => p.endsWith('src/apiClient.ts')));
+  assert.ok(zipPaths.some((p) => p.endsWith('src/index.ts')));
   assert.ok(zipPaths.some((p) => p.endsWith('integration.manifest.json')));
 
   // State machine transition check
